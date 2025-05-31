@@ -142,7 +142,6 @@ func JSONOnly() fiber.Handler {
 	}
 }
 
-// ValidateContentLength middleware สำหรับจำกัดขนาด request body
 func ValidateContentLength(maxSize int64) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		contentLength := c.Request().Header.ContentLength()
@@ -159,12 +158,12 @@ func ValidateContentLength(maxSize int64) fiber.Handler {
 	}
 }
 
-// generateRequestID สร้าง unique request ID
+
 func generateRequestID() string {
 	return time.Now().Format("20060102150405") + "-" + randomString(8)
 }
 
-// randomString สร้าง random string
+
 func randomString(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, length)

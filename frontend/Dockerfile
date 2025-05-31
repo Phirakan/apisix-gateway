@@ -1,5 +1,5 @@
-# Build stage
-FROM node:18-alpine AS builder
+# Simple Dockerfile without Nginx
+FROM node:18-alpine
 
 WORKDIR /app
 
@@ -15,17 +15,11 @@ COPY . .
 # Build the app
 RUN npm run build
 
-# Production stage
-FROM nginx:alpine
-
-# Copy built app to nginx
-COPY --from=builder /app/build /usr/share/nginx/html
-
-# Copy nginx config (optional)
-# COPY nginx.conf /etc/nginx/nginx.conf
+# Install serve globally
+RUN npm install -g serve
 
 # Expose port
-EXPOSE 80
+EXPOSE 3000
 
-# Start nginx
-CMD ["nginx", "-g", "daemon off;"]
+# Serve the built app
+CMD ["serve", "-s", "dist", "-l", "3000"]

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # etcd for APISIX configuration storage
   etcd:
@@ -15,7 +13,7 @@ services:
 
   # APISIX API Gateway
   apisix:
-    image: apache/apisix:3.0.0-alpine
+    image: apache/apisix:3.9.1-debian
     container_name: apisix
     restart: always
     volumes:
@@ -82,15 +80,20 @@ services:
     networks:
       - apisix-network
 
-  # React Dashboard
-  react-dashboard:
-    build: ./frontend
-    container_name: react-dashboard
+  # React Dashboard (Simple Version)
+  apisix-react-dashboard:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: apisix-react-dashboard
     restart: always
     ports:
-      - "3001:3000"
+      - "3001:3000" # เปลี่ยนจาก 80 เป็น 3000
     environment:
-      - REACT_APP_APISIX_ADMIN_URL=http://localhost:9180
+      # ใช้ localhost เพราะจะเข้าจาก browser
+      - VITE_APISIX_ADMIN_URL=http://localhost:9180
+    depends_on:
+      - apisix
     networks:
       - apisix-network
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import RouteList from './RouteList';
 import CreateRoute from './CreateRoute';
-import { api } from '../services/api';
+import { api } from '../service/api';
 
 const Dashboard = () => {
   const [activeTab, setActiveTab] = useState('routes');
@@ -40,6 +40,7 @@ const Dashboard = () => {
       await api.testWordPressAPI();
       setApiStatus(prev => ({ ...prev, wordpress: 'success' }));
     } catch (error) {
+      console.error('WordPress API test failed:', error);
       setApiStatus(prev => ({ ...prev, wordpress: 'error' }));
     }
 
@@ -47,6 +48,7 @@ const Dashboard = () => {
       await api.testGoFiberAPI();
       setApiStatus(prev => ({ ...prev, gofiber: 'success' }));
     } catch (error) {
+      console.error('GoFiber API test failed:', error);
       setApiStatus(prev => ({ ...prev, gofiber: 'error' }));
     }
   };

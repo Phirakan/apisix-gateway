@@ -10,7 +10,7 @@
 User Request → APISIX Gateway → WordPress API / GoFiber Backend
                     ↓
 React Dashboard ← APISIX Admin API
-                    ↓ 
+                    ↓
               GoFiber ← MariaDB
 ```
 
@@ -27,12 +27,14 @@ React Dashboard ← APISIX Admin API
 ## 📦 Quick Start
 
 ### 1. Clone Project
+
 ```bash
 git clone <your-repo>
 cd apisix-wordpress-integration
 ```
 
 ### 2. สร้างโฟลเดอร์และไฟล์ตาม Structure
+
 ```bash
 # สร้างโฟลเดอร์
 mkdir -p backend/models
@@ -45,6 +47,7 @@ mkdir -p apisix
 ```
 
 ### 3. รัน Docker Compose
+
 ```bash
 # Build และรัน services ทั้งหมด
 docker-compose up --build
@@ -54,12 +57,14 @@ docker-compose up -d --build
 ```
 
 ### 4. Setup WordPress (ครั้งแรกเท่านั้น)
+
 1. เข้า http://localhost:8080
 2. Setup WordPress installation
 3. เลือก language และสร้าง admin user
 4. เข้า WP Admin และเพิ่ม posts เพื่อทดสอบ
 
 ### 5. เข้าใช้งาน React Dashboard
+
 ```bash
 # เข้า Dashboard
 http://localhost:3001
@@ -72,6 +77,7 @@ http://localhost:3001
 ### APISIX Routes ที่สร้างอัตโนมัติ:
 
 1. **WordPress API Route**
+
    - URI: `/api/posts`
    - Upstream: `wordpress:80`
    - Rewrite: `/wp-json/wp/v2/posts`
@@ -84,6 +90,7 @@ http://localhost:3001
 ## 📡 API Endpoints
 
 ### WordPress API (ผ่าน APISIX)
+
 ```bash
 # Get WordPress posts
 GET http://localhost:9080/api/posts
@@ -93,6 +100,7 @@ GET http://localhost:9080/api/posts/1
 ```
 
 ### GoFiber API (ผ่าน APISIX)
+
 ```bash
 # Get all records
 GET http://localhost:9080/api/data
@@ -121,6 +129,7 @@ DELETE http://localhost:9080/api/data/1
 ```
 
 ### Direct GoFiber API (สำหรับทดสอบ)
+
 ```bash
 # Health check
 GET http://localhost:3000/api/health
@@ -132,17 +141,20 @@ GET http://localhost:3000/api/data
 ## 🎯 Dashboard Features
 
 ### 1. Overview
+
 - สถานะของ services ต่างๆ
 - จำนวน routes และ upstreams
 - Quick actions สำหรับการจัดการ
 
 ### 2. Routes Management
+
 - ดู routes ทั้งหมด
 - สร้าง route ใหม่
 - ลบ routes
 - ดู configuration แบบ JSON
 
 ### 3. Create Route
+
 - Form สำหรับสร้าง route ใหม่
 - Quick fill templates สำหรับ WordPress และ GoFiber
 - การตั้งค่า plugins (CORS, Authentication, Proxy Rewrite)
@@ -150,6 +162,7 @@ GET http://localhost:3000/api/data
 ## 🔒 Security
 
 ### API Key Authentication (สำหรับ GoFiber)
+
 ```bash
 # สร้าง consumer และ API key
 curl -X POST http://localhost:9180/apisix/admin/consumers \
@@ -170,6 +183,7 @@ curl -H 'apikey: test-api-key' http://localhost:9080/api/data
 ## 🛠️ Development
 
 ### Backend (GoFiber)
+
 ```bash
 cd backend
 
@@ -181,6 +195,7 @@ go run main.go
 ```
 
 ### Frontend (React)
+
 ```bash
 cd frontend
 
@@ -197,6 +212,7 @@ npm run build
 ## 📊 Monitoring
 
 ### APISIX Admin API
+
 ```bash
 # ดู routes ทั้งหมด
 curl -X GET http://localhost:9180/apisix/admin/routes \
@@ -208,6 +224,7 @@ curl -X GET http://localhost:9180/apisix/admin/upstreams \
 ```
 
 ### Database Connection
+
 ```bash
 # เข้า MariaDB
 docker exec -it mariadb mysql -u apisix_user -p
@@ -222,6 +239,7 @@ SELECT * FROM records;
 ## 🐛 Troubleshooting
 
 ### 1. Services ไม่เริ่มต้น
+
 ```bash
 # ดู logs
 docker-compose logs [service-name]
@@ -231,6 +249,7 @@ docker-compose restart [service-name]
 ```
 
 ### 2. APISIX ไม่สามารถเชื่อมต่อ etcd
+
 ```bash
 # ตรวจสอบ etcd
 docker-compose logs etcd
@@ -240,6 +259,7 @@ docker-compose restart apisix
 ```
 
 ### 3. Database connection error
+
 ```bash
 # ตรวจสอบ MariaDB
 docker-compose logs mariadb
@@ -249,6 +269,7 @@ docker exec -it mariadb mysql -u root -p
 ```
 
 ### 4. React Dashboard ไม่สามารถเชื่อมต่อ APISIX Admin API
+
 - ตรวจสอบ CORS settings
 - ตรวจสอบ Admin Key
 - ดู browser console เพื่อหา error
@@ -258,10 +279,12 @@ docker exec -it mariadb mysql -u root -p
 ### GoFiber Endpoints
 
 #### Health Check
+
 - **GET** `/api/health`
 - **Response**: `{ "status": "ok", "message": "GoFiber backend is running", "time": "2024-01-01T00:00:00Z" }`
 
 #### Records CRUD
+
 - **GET** `/api/data` - Get all records
 - **POST** `/api/data` - Create record
   ```json
@@ -277,6 +300,7 @@ docker exec -it mariadb mysql -u root -p
 ## 🎉 Demo Scenarios
 
 ### 1. ทดสอบ WordPress API
+
 ```bash
 # ผ่าน APISIX
 curl http://localhost:9080/api/posts
@@ -286,6 +310,7 @@ curl http://localhost:8080/wp-json/wp/v2/posts
 ```
 
 ### 2. ทดสอบ GoFiber API
+
 ```bash
 # Create record
 curl -X POST http://localhost:9080/api/data \
@@ -297,6 +322,7 @@ curl http://localhost:9080/api/data
 ```
 
 ### 3. ใช้ Dashboard
+
 1. เปิด http://localhost:3001
 2. ดู routes ปัจจุบัน
 3. สร้าง route ใหม่ด้วย form

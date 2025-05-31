@@ -1,5 +1,5 @@
 import React from 'react';
-import { api } from '../services/api';
+import { api } from '../service/api';
 
 const RouteList = ({ routes, onRouteDeleted }) => {
   const handleDeleteRoute = async (routeKey) => {
