@@ -1,0 +1,103 @@
+version: '3.8'
+
+services:
+  # etcd for APISIX configuration storage
+  etcd:
+    image: bitnami/etcd:3.5.0
+    container_name: etcd
+    environment:
+      - ALLOW_NONE_AUTHENTICATION=yes
+      - ETCD_ADVERTISE_CLIENT_URLS=http://0.0.0.0:2379
+    ports:
+      - "2379:2379"
+    networks:
+      - apisix-network
+
+  # APISIX API Gateway
+  apisix:
+    image: apache/apisix:3.0.0-alpine
+    container_name: apisix
+    restart: always
+    volumes:
+      - ./apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
+    depends_on:
+      - etcd
+    ports:
+      - "9080:9080"
+      - "9180:9180"
+    networks:
+      - apisix-network
+
+  # MariaDB Database
+  mariadb:
+    image: mariadb:10.6
+    container_name: mariadb
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: apisix_db
+      MYSQL_USER: apisix_user
+      MYSQL_PASSWORD: apisix_pass
+    ports:
+      - "3306:3306"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    networks:
+      - apisix-network
+
+  # WordPress API Provider
+  wordpress:
+    image: wordpress:latest
+    container_name: wordpress
+    restart: always
+    environment:
+      WORDPRESS_DB_HOST: mariadb
+      WORDPRESS_DB_USER: apisix_user
+      WORDPRESS_DB_PASSWORD: apisix_pass
+      WORDPRESS_DB_NAME: apisix_db
+    ports:
+      - "8080:80"
+    depends_on:
+      - mariadb
+    volumes:
+      - wordpress_data:/var/www/html
+    networks:
+      - apisix-network
+
+  # GoFiber Backend
+  gofiber-backend:
+    build: ./backend
+    container_name: gofiber-backend
+    restart: always
+    environment:
+      DB_HOST: mariadb
+      DB_PORT: 3306
+      DB_USER: apisix_user
+      DB_PASSWORD: apisix_pass
+      DB_NAME: apisix_db
+    ports:
+      - "3000:3000"
+    depends_on:
+      - mariadb
+    networks:
+      - apisix-network
+
+  # React Dashboard
+  react-dashboard:
+    build: ./frontend
+    container_name: react-dashboard
+    restart: always
+    ports:
+      - "3001:3000"
+    environment:
+      - REACT_APP_APISIX_ADMIN_URL=http://localhost:9180
+    networks:
+      - apisix-network
+
+networks:
+  apisix-network:
+    driver: bridge
+
+volumes:
+  mariadb_data:
+  wordpress_data:
