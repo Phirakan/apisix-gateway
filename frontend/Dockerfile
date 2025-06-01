@@ -1,4 +1,3 @@
-# Simple Dockerfile without Nginx
 FROM node:18-alpine
 
 WORKDIR /app
@@ -18,8 +17,8 @@ RUN npm run build
 # Install serve globally
 RUN npm install -g serve
 
-# Expose port
-EXPOSE 3000
+# Expose port (Vite standard)
+EXPOSE 5173
 
-# Serve the built app
-CMD ["serve", "-s", "dist", "-l", "3000"]
+# Serve the built app on port 5173
+CMD ["serve", "-s", "dist", "-l", "5173"]

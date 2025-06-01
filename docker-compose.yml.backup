@@ -3,46 +3,43 @@ services:
   etcd:
     image: bitnami/etcd:3.5.0
     container_name: etcd
-    restart: unless-stopped
     environment:
       - ALLOW_NONE_AUTHENTICATION=yes
       - ETCD_ADVERTISE_CLIENT_URLS=http://0.0.0.0:2379
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
     ports:
       - "2379:2379"
     networks:
       - apisix-network
-    healthcheck:
-      test: ["CMD", "etcdctl", "endpoint", "health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
-  # APISIX API Gateway
+  # APISIX API Gateway with environment variables
   apisix:
     image: apache/apisix:3.9.1-debian
     container_name: apisix
-    restart: unless-stopped
-    volumes:
-      - ./apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
+    restart: always
     depends_on:
-      etcd:
-        condition: service_healthy
+      - etcd
     ports:
-      - "9080:9080"  # Gateway port
-      - "9180:9180"  # Admin API port
+      - "9080:9080"
+      - "9180:9180"
     networks:
       - apisix-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9080/apisix/status"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    environment:
+      # ใช้ environment variables แทน config file
+      - APISIX_STAND_ALONE=false
+      - APISIX_ETCD_HOST=http://etcd:2379
+      - APISIX_ETCD_PREFIX=/apisix
+      - APISIX_ETCD_TIMEOUT=30
+      - APISIX_ADMIN_KEY_REQUIRED=false
+    # ลบ volume mount ออกไปก่อน
+    # volumes:
+    #   - ./apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
 
   # MariaDB Database
   mariadb:
     image: mariadb:10.6
     container_name: mariadb
-    restart: unless-stopped
+    restart: always
     environment:
       MYSQL_ROOT_PASSWORD: rootpassword
       MYSQL_DATABASE: apisix_db
@@ -52,83 +49,59 @@ services:
       - "3306:3306"
     volumes:
       - mariadb_data:/var/lib/mysql
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
       - apisix-network
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
 
   # WordPress API Provider
   wordpress:
     image: wordpress:latest
     container_name: wordpress
-    restart: unless-stopped
+    restart: always
     environment:
       WORDPRESS_DB_HOST: mariadb
       WORDPRESS_DB_USER: apisix_user
       WORDPRESS_DB_PASSWORD: apisix_pass
       WORDPRESS_DB_NAME: apisix_db
-      WORDPRESS_TABLE_PREFIX: wp_
     ports:
       - "8080:80"
     depends_on:
-      mariadb:
-        condition: service_healthy
+      - mariadb
     volumes:
       - wordpress_data:/var/www/html
     networks:
       - apisix-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
   # GoFiber Backend
   gofiber-backend:
-    build: 
-      context: ./backend
-      dockerfile: Dockerfile
+    build: ./backend
     container_name: gofiber-backend
-    restart: unless-stopped
+    restart: always
     environment:
       DB_HOST: mariadb
       DB_PORT: 3306
       DB_USER: apisix_user
       DB_PASSWORD: apisix_pass
       DB_NAME: apisix_db
-      PORT: 3000
-      ENVIRONMENT: production
     ports:
       - "3000:3000"
     depends_on:
-      mariadb:
-        condition: service_healthy
+      - mariadb
     networks:
       - apisix-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
   # React Dashboard
-  apisix-dashboard:
+  apisix-react-dashboard:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: apisix-dashboard
-    restart: unless-stopped
+    container_name: apisix-react-dashboard
+    restart: always
     ports:
-      - "5173:5173"
+      - "3001:3000"
     environment:
       - VITE_APISIX_ADMIN_URL=http://localhost:9180
     depends_on:
-      apisix:
-        condition: service_healthy
+      - apisix
     networks:
       - apisix-network
 
