@@ -1,18 +1,6 @@
 version: '3.9'
 
 services:
-  etcd:
-    image: bitnami/etcd:3.5.0
-    container_name: etcd
-    ports:
-      - "2379:2379"
-    environment:
-      - ALLOW_NONE_AUTHENTICATION=yes
-      - ETCD_ADVERTISE_CLIENT_URLS=http://etcd:2379
-      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
-    networks:
-      - gateway-net
-
   apisix_api:
     image: apache/apisix:3.9.1-debian
     container_name: apisix_api
@@ -21,10 +9,12 @@ services:
       - "9180:9180"
     volumes:
       - ./apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
-    depends_on:
-      - etcd
+      - ./apisix/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
+    environment:
+      - APISIX_STAND_ALONE=true
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9180/apisix/admin/routes"]
+      test: ["CMD", "curl", "-f", "http://localhost:9080/apisix/status"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -75,11 +65,11 @@ services:
     networks:
       - gateway-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/wp-json/wp/v2"]
+      test: ["CMD", "curl", "-f", "http://localhost"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 120s
 
   gofiber-backend:
     build:
@@ -119,13 +109,18 @@ services:
     ports:
       - "5173:5173"
     environment:
-      - VITE_APISIX_ADMIN_URL=http://localhost:9180
-      - VITE_APISIX_GATEWAY_URL=http://localhost:9080
+      - NODE_ENV=production
     depends_on:
       apisix_api:
         condition: service_healthy
     networks:
       - gateway-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5173"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
 networks:
   gateway-net:

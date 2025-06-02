@@ -1,41 +1,9 @@
 apisix:
   node_listen: 9080
-  enable_admin: true
-  admin_listen:
-    ip: "0.0.0.0"
-    port: 9180
-  admin_api_cors: true
+  enable_admin: false
+  config_center: yaml
 
 deployment:
-  role: traditional
-  role_traditional:
-    config_provider: etcd
-
-etcd:
-  host:
-    - "http://etcd:2379"
-
-admin:
-  admin_key:
-    - name: "admin"
-      key: "edd1c9f034335f136f87ad84b625c8f1"
-      role: admin
-  cors:
-    allow_origins: "*"
-    allow_methods: "GET,POST,PUT,DELETE,OPTIONS,PATCH"
-    allow_headers: "Origin,Content-Type,Accept,Authorization,X-API-Key"
-    max_age: 86400
-
-plugins:
-  - public-api
-  - cors
-  - proxy-rewrite
-  - key-auth
-  - limit-req
-  - limit-count
-
-plugin_attr:
-  prometheus:
-    export_addr:
-      ip: "0.0.0.0"
-      port: 9091
+  role: data_plane
+  role_data_plane:
+    config_provider: yaml
