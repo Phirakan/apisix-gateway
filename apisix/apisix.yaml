@@ -1,15 +1,39 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
 routes:
   - id: 1
     name: "WordPress Posts API"
     uri: "/api/posts"
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    methods: 
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - OPTIONS
     upstream:
       type: roundrobin
       nodes:
         "wordpress:80": 1
     plugins:
       proxy-rewrite:
-        regex_uri: ["^/api/posts(.*)", "/wp-json/wp/v2/posts$1"]
+        regex_uri: 
+          - "^/api/posts(.*)"
+          - "/wp-json/wp/v2/posts$1"
       cors:
         allow_origins: "*"
         allow_methods: "GET,POST,PUT,DELETE,OPTIONS"
@@ -19,8 +43,13 @@ routes:
 
   - id: 2
     name: "GoFiber Data API"
-    uri: "/api/data/*"
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    uri: "/api/data"
+    methods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - OPTIONS
     upstream:
       type: roundrobin
       nodes:
@@ -34,9 +63,32 @@ routes:
         max_age: 86400
 
   - id: 3
+    name: "GoFiber Data API Wildcard"
+    uri: "/api/data/*"
+    methods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - OPTIONS
+    upstream:
+      type: roundrobin
+      nodes:
+        "gofiber-backend:3000": 1
+    plugins:
+      cors:
+        allow_origins: "*"
+        allow_methods: "GET,POST,PUT,DELETE,OPTIONS"
+        allow_headers: "Origin,Content-Type,Accept,Authorization"
+        allow_credentials: false
+        max_age: 86400
+
+  - id: 4
     name: "GoFiber Health Check"
     uri: "/api/health"
-    methods: ["GET", "OPTIONS"]
+    methods:
+      - GET
+      - OPTIONS
     upstream:
       type: roundrobin
       nodes:
@@ -61,3 +113,5 @@ upstreams:
     type: roundrobin
     nodes:
       "gofiber-backend:3000": 1
+
+#END
