@@ -1,34 +1,37 @@
+version: '3.9'
+
 services:
-  # etcd for APISIX configuration storage
   etcd:
     image: bitnami/etcd:3.5.0
     container_name: etcd
-    restart: unless-stopped
-    environment:
-      - ALLOW_NONE_AUTHENTICATION=yes
-      - ETCD_ADVERTISE_CLIENT_URLS=http://0.0.0.0:2379
-      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
     ports:
       - "2379:2379"
+    environment:
+      - ALLOW_NONE_AUTHENTICATION=yes
+      - ETCD_ADVERTISE_CLIENT_URLS=http://etcd:2379
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
     networks:
-      - apisix-network
+      - gateway-net
 
-  # APISIX API Gateway - Minimal Configuration
-  apisix:
+  apisix_api:
     image: apache/apisix:3.9.1-debian
-    container_name: apisix
-    restart: unless-stopped
-    depends_on:
-      - etcd
+    container_name: apisix_api
     ports:
       - "9080:9080"
       - "9180:9180"
-    networks:
-      - apisix-network
     volumes:
-      - ./apisix-custom.yaml:/usr/local/apisix/conf/config.yaml:ro
-    
-  # MariaDB Database
+      - ./apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
+    depends_on:
+      - etcd
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9180/apisix/admin/routes"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - gateway-net
+
   mariadb:
     image: mariadb:10.6
     container_name: mariadb
@@ -44,9 +47,14 @@ services:
       - mariadb_data:/var/lib/mysql
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
-      - apisix-network
+      - gateway-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
 
-  # WordPress API Provider
   wordpress:
     image: wordpress:latest
     container_name: wordpress
@@ -60,15 +68,21 @@ services:
     ports:
       - "8080:80"
     depends_on:
-      - mariadb
+      mariadb:
+        condition: service_healthy
     volumes:
       - wordpress_data:/var/www/html
     networks:
-      - apisix-network
+      - gateway-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/wp-json/wp/v2"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
-  # GoFiber Backend
   gofiber-backend:
-    build: 
+    build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: gofiber-backend
@@ -81,14 +95,21 @@ services:
       DB_NAME: apisix_db
       PORT: 3000
       ENVIRONMENT: production
+      DEBUG: false
     ports:
       - "3000:3000"
     depends_on:
-      - mariadb
+      mariadb:
+        condition: service_healthy
     networks:
-      - apisix-network
+      - gateway-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
-  # React Dashboard
   apisix-dashboard:
     build:
       context: ./frontend
@@ -99,13 +120,15 @@ services:
       - "5173:5173"
     environment:
       - VITE_APISIX_ADMIN_URL=http://localhost:9180
+      - VITE_APISIX_GATEWAY_URL=http://localhost:9080
     depends_on:
-      - apisix
+      apisix_api:
+        condition: service_healthy
     networks:
-      - apisix-network
+      - gateway-net
 
 networks:
-  apisix-network:
+  gateway-net:
     driver: bridge
 
 volumes:
