@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"apisix-backend/config"
 	"apisix-backend/database"
@@ -12,6 +13,7 @@ import (
 	"apisix-backend/routes"
 
 	"github.com/gofiber/fiber/v2"
+	"gorm.io/gorm"
 )
 
 func main() {
@@ -26,7 +28,11 @@ func main() {
 		log.Fatal("❌ Configuration validation failed:", errors)
 	}
 	
-	// Connect to database
+	// เพิ่มการรอ MariaDB ให้พร้อม
+	log.Println("⏳ Waiting for MariaDB to be ready...")
+	time.Sleep(10 * time.Second) // รอ MariaDB เริ่มต้น
+	
+	// Connect to database with retry
 	log.Println("🗄️  Connecting to MariaDB...")
 	dbConfig := &database.DatabaseConfig{
 		Host:     cfg.Database.Host,
@@ -36,30 +42,56 @@ func main() {
 		DBName:   cfg.Database.DBName,
 	}
 	
-	db, err := database.Connect(dbConfig)
-	if err != nil {
-		log.Fatal("❌ Failed to connect to database:", err)
+	var db *gorm.DB
+	var err error
+	
+	// Retry connection to database
+	maxRetries := 30
+	for i := 0; i < maxRetries; i++ {
+		db, err = database.Connect(dbConfig)
+		if err == nil {
+			log.Println("✅ Database connected successfully")
+			break
+		}
+		
+		log.Printf("⚠️  Database connection attempt %d/%d failed: %v", i+1, maxRetries, err)
+		if i < maxRetries-1 {
+			log.Println("🔄 Retrying in 3 seconds...")
+			time.Sleep(3 * time.Second)
+		}
 	}
-	log.Println("✅ Database connected successfully")
+	
+	if err != nil {
+		log.Fatalf("❌ Failed to connect to database after %d attempts: %v", maxRetries, err)
+	}
 
 	// Run migrations
+	log.Println("📦 Running database migrations...")
 	if err := database.Migrate(db); err != nil {
 		log.Fatal("❌ Failed to migrate database:", err)
 	}
+	log.Println("✅ Database migrations completed")
 	
 	// Seed sample data if enabled
 	if cfg.Features.EnableSampleData {
+		log.Println("🌱 Seeding sample data...")
 		if err := database.SeedData(db); err != nil {
 			log.Printf("⚠️  Warning: Failed to seed sample data: %v", err)
+		} else {
+			log.Println("✅ Sample data seeded successfully")
 		}
 	}
 
-	// Create Fiber app with configuration
+	// Create Fiber app with optimized configuration
 	app := fiber.New(fiber.Config{
-		Prefork:      cfg.Server.Prefork,
-		ServerHeader: "GoFiber APISIX Backend",
-		AppName:      "APISIX Backend v1.0.0",
-		BodyLimit:    int(cfg.Security.MaxRequestSize),
+		Prefork:               cfg.Server.Prefork,
+		ServerHeader:          "GoFiber APISIX Backend",
+		AppName:               "APISIX Backend v1.0.0",
+		BodyLimit:             int(cfg.Security.MaxRequestSize),
+		ReadTimeout:           time.Duration(cfg.Server.ReadTimeout) * time.Second,
+		WriteTimeout:          time.Duration(cfg.Server.WriteTimeout) * time.Second,
+		IdleTimeout:           time.Second * 30,
+		DisableStartupMessage: false,
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
 			code := fiber.StatusInternalServerError
 			if e, ok := err.(*fiber.Error); ok {
@@ -74,12 +106,13 @@ func main() {
 				"status":     "error",
 				"code":       code,
 				"request_id": c.Locals("requestId"),
-				"timestamp":  c.Response().Header.Peek("Date"),
+				"timestamp":  time.Now().Format(time.RFC3339),
 			})
 		},
 	})
 
 	// Setup middleware
+	log.Println("🔧 Setting up middleware...")
 	middleware.SetupMiddleware(app)
 	
 	// Additional security middleware
@@ -95,7 +128,9 @@ func main() {
 	}
 
 	// Setup routes
+	log.Println("🛣️  Setting up routes...")
 	routes.SetupRoutes(app, db)
+	log.Println("✅ Routes configured successfully")
 
 	// Graceful shutdown
 	c := make(chan os.Signal, 1)
@@ -127,6 +162,7 @@ func main() {
 	log.Printf("   Health Check: http://%s/api/health", address)
 	log.Printf("   API Docs:     http://%s/", address)
 	log.Printf("   Data API:     http://%s/api/data", address)
+	log.Println("🎉 GoFiber backend ready!")
 	
 	if cfg.Security.EnableHTTPS {
 		log.Printf("🔒 HTTPS enabled")

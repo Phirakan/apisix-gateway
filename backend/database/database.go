@@ -35,45 +35,76 @@ func GetConfigFromEnv() *DatabaseConfig {
 
 // Connect สร้างการเชื่อมต่อกับ database
 func Connect(config *DatabaseConfig) (*gorm.DB, error) {
-	// สร้าง DSN (Data Source Name)
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+	// สร้าง DSN (Data Source Name) with additional parameters
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=30s&readTimeout=30s&writeTimeout=30s",
 		config.User, config.Password, config.Host, config.Port, config.DBName)
 
-	log.Printf("Connecting to database at %s:%s", config.Host, config.Port)
+	log.Printf("Attempting to connect to database at %s:%s", config.Host, config.Port)
 
 	var db *gorm.DB
 	var err error
 
-	// ลองเชื่อมต่อหลายครั้ง (retry logic)
-	maxRetries := 30
+	// ปรับ retry logic ให้มีประสิทธิภาพมากขึ้น
+	maxRetries := 15
+	baseDelay := 2 * time.Second
+	
 	for i := 0; i < maxRetries; i++ {
-		db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
-			Logger: logger.Default.LogMode(logger.Info),
-		})
-		
-		if err == nil {
-			log.Println("Successfully connected to database")
-			break
+		// สร้าง GORM config ที่เหมาะสม
+		gormConfig := &gorm.Config{
+			Logger: logger.New(
+				log.New(os.Stdout, "\r\n", log.LstdFlags),
+				logger.Config{
+					SlowThreshold:             time.Second,
+					LogLevel:                  logger.Info,
+					IgnoreRecordNotFoundError: false,
+					Colorful:                  true,
+				},
+			),
+			DisableForeignKeyConstraintWhenMigrating: true,
+			PrepareStmt:                              true,
 		}
 		
-		log.Printf("Failed to connect to database (attempt %d/%d): %v", i+1, maxRetries, err)
-		time.Sleep(time.Second * 2)
+		db, err = gorm.Open(mysql.Open(dsn), gormConfig)
+		
+		if err == nil {
+			// ทดสอบการเชื่อมต่อจริง
+			sqlDB, sqlErr := db.DB()
+			if sqlErr == nil {
+				if pingErr := sqlDB.Ping(); pingErr == nil {
+					log.Println("✅ Successfully connected to database")
+					
+					// ตั้งค่า connection pool ที่เหมาะสม
+					sqlDB.SetMaxIdleConns(5)            // ลดจาก 10
+					sqlDB.SetMaxOpenConns(20)           // ลดจาก 100
+					sqlDB.SetConnMaxLifetime(time.Hour) // 1 ชั่วโมง
+					sqlDB.SetConnMaxIdleTime(10 * time.Minute) // 10 นาที
+					
+					return db, nil
+				} else {
+					err = fmt.Errorf("ping failed: %w", pingErr)
+				}
+			} else {
+				err = fmt.Errorf("failed to get SQL DB: %w", sqlErr)
+			}
+		}
+		
+		// คำนวณ delay แบบ exponential backoff
+		delay := baseDelay * time.Duration(i+1)
+		if delay > 10*time.Second {
+			delay = 10 * time.Second
+		}
+		
+		log.Printf("⚠️  Connection attempt %d/%d failed: %v", i+1, maxRetries, err)
+		
+		if i < maxRetries-1 {
+			log.Printf("🔄 Retrying in %v...", delay)
+			time.Sleep(delay)
+		}
 	}
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database after %d attempts: %w", maxRetries, err)
 	}
-
-	// ตั้งค่า connection pool
-	sqlDB, err := db.DB()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get database instance: %w", err)
-	}
-
-	// ตั้งค่า connection pool
-	sqlDB.SetMaxIdleConns(10)           // จำนวน connection ที่เก็บไว้ในสถานะ idle
-	sqlDB.SetMaxOpenConns(100)          // จำนวน connection สูงสุด
-	sqlDB.SetConnMaxLifetime(time.Hour) // อายุของ connection
 
 	return db, nil
 }
@@ -81,6 +112,16 @@ func Connect(config *DatabaseConfig) (*gorm.DB, error) {
 // Migrate ทำการ migrate database schema
 func Migrate(db *gorm.DB) error {
 	log.Println("Starting database migration...")
+
+	// ใช้ migrate mode แบบ safe
+	migrator := db.Migrator()
+	
+	// ตรวจสอบว่าตาราง records มีอยู่หรือไม่
+	if !migrator.HasTable(&models.Record{}) {
+		log.Println("Creating records table...")
+	} else {
+		log.Println("Records table already exists, checking for updates...")
+	}
 
 	// Auto migrate models
 	err := db.AutoMigrate(
@@ -92,7 +133,7 @@ func Migrate(db *gorm.DB) error {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
 
-	log.Println("Database migration completed successfully")
+	log.Println("✅ Database migration completed successfully")
 	return nil
 }
 
@@ -102,7 +143,10 @@ func SeedData(db *gorm.DB) error {
 
 	// ตรวจสอบว่ามีข้อมูลอยู่แล้วหรือไม่
 	var count int64
-	db.Model(&models.Record{}).Count(&count)
+	result := db.Model(&models.Record{}).Count(&count)
+	if result.Error != nil {
+		return fmt.Errorf("failed to count records: %w", result.Error)
+	}
 
 	if count > 0 {
 		log.Printf("Sample data already exists (%d records)", count)
@@ -115,44 +159,52 @@ func SeedData(db *gorm.DB) error {
 	sampleRecords := []models.Record{
 		{
 			Name:  "Sample Record 1",
-			Value: "This is the first sample record",
+			Value: "This is the first sample record for testing APISIX integration",
 		},
 		{
 			Name:  "Sample Record 2",
-			Value: "This is the second sample record",
-		},
-		{
-			Name:  "Sample Record 3",
-			Value: "This is the third sample record with more detailed information",
+			Value: "This is the second sample record with more detailed information",
 		},
 		{
 			Name:  "API Test Record",
-			Value: "This record is for testing API functionality",
+			Value: "This record is specifically for testing API functionality through APISIX gateway",
 		},
 		{
-			Name:  "APISIX Integration",
-			Value: "Testing APISIX gateway integration with GoFiber backend",
+			Name:  "APISIX Integration Test",
+			Value: "Testing APISIX gateway integration with GoFiber backend and MariaDB database",
+		},
+		{
+			Name:  "Health Check Data",
+			Value: "Sample data to verify that the health check endpoint is working correctly",
 		},
 	}
 
-	// บันทึกข้อมูลตัวอย่าง
-	if err := db.Create(&sampleRecords).Error; err != nil {
-		return fmt.Errorf("failed to create sample data: %w", err)
+	// บันทึกข้อมูลตัวอย่างแบบ batch
+	result = db.CreateInBatches(&sampleRecords, 100)
+	if result.Error != nil {
+		return fmt.Errorf("failed to create sample data: %w", result.Error)
 	}
 
-	log.Printf("Successfully created %d sample records", len(sampleRecords))
+	log.Printf("✅ Successfully created %d sample records", len(sampleRecords))
 	return nil
 }
 
 // HealthCheck ตรวจสอบสถานะการเชื่อมต่อ database
 func HealthCheck(db *gorm.DB) error {
+	// ทดสอบการเชื่อมต่อ
 	sqlDB, err := db.DB()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get SQL DB: %w", err)
 	}
 
 	if err := sqlDB.Ping(); err != nil {
 		return fmt.Errorf("database ping failed: %w", err)
+	}
+
+	// ทดสอบ query ธรรมดา
+	var result int
+	if err := db.Raw("SELECT 1").Scan(&result).Error; err != nil {
+		return fmt.Errorf("database query test failed: %w", err)
 	}
 
 	return nil
@@ -160,12 +212,21 @@ func HealthCheck(db *gorm.DB) error {
 
 // Close ปิดการเชื่อมต่อ database
 func Close(db *gorm.DB) error {
+	if db == nil {
+		return nil
+	}
+	
 	sqlDB, err := db.DB()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get SQL DB: %w", err)
 	}
 
-	return sqlDB.Close()
+	if err := sqlDB.Close(); err != nil {
+		return fmt.Errorf("failed to close database: %w", err)
+	}
+	
+	log.Println("Database connection closed successfully")
+	return nil
 }
 
 // helper function สำหรับอ่านค่า environment variable
