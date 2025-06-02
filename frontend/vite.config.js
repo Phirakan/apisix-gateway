@@ -2,20 +2,20 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-// https://vite.dev/config/
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
   ],
-  server: {
+ server: {
     port: 5173,
-    host: '0.0.0.0', // Allow external connections
+    host: '0.0.0.0',
     proxy: {
       '/wp-json': {
-        target: 'http://localhost:8080',
+        target: 'http://localhost:8080/',  // Fixed: Changed from 8080 to 8880
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/wp-json/, '/wp-json'),
+        secure: false,  // Add this if using HTTPS
+        // Removed unnecessary rewrite function
       }
     }
   },

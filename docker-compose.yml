@@ -1,65 +1,6 @@
 version: '3.9'
 
 services:
-  mariadb:
-    image: mariadb:10.6
-    container_name: mariadb
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: apisix_db
-      MYSQL_USER: apisix_user
-      MYSQL_PASSWORD: apisix_pass
-    ports:
-      - "3306:3306"
-    volumes:
-      - mariadb_data:/var/lib/mysql
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    networks:
-      - gateway-net
-
-  gofiber-backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: gofiber-backend
-    restart: unless-stopped
-    environment:
-      DB_HOST: mariadb
-      DB_PORT: 3306
-      DB_USER: apisix_user
-      DB_PASSWORD: apisix_pass
-      DB_NAME: apisix_db
-      PORT: 3000
-      ENVIRONMENT: production
-      DEBUG: false
-      ENABLE_SAMPLE_DATA: true
-    ports:
-      - "3000:3000"
-    depends_on:
-      - mariadb
-    networks:
-      - gateway-net
-
-  wordpress:
-    image: wordpress:latest
-    container_name: wordpress
-    restart: unless-stopped
-    environment:
-      WORDPRESS_DB_HOST: mariadb
-      WORDPRESS_DB_USER: apisix_user
-      WORDPRESS_DB_PASSWORD: apisix_pass
-      WORDPRESS_DB_NAME: apisix_db
-      WORDPRESS_TABLE_PREFIX: wp_
-    ports:
-      - "8080:80"
-    depends_on:
-      - mariadb
-    volumes:
-      - wordpress_data:/var/www/html
-    networks:
-      - gateway-net
-
   apisix_api:
     image: apache/apisix:3.9.1-debian
     container_name: apisix_api
@@ -87,13 +28,121 @@ services:
         /usr/bin/apisix init &&
         /usr/bin/apisix start &&
         echo 'APISIX started successfully!' &&
+        echo 'Testing internal connectivity...' &&
+        sleep 5 &&
+        curl -s http://gofiber-backend:3000/api/health || echo 'GoFiber not ready yet' &&
+        curl -s http://wordpress/wp-json/wp/v2/posts || echo 'WordPress not ready yet' &&
+        echo 'Monitoring logs...' &&
         tail -f /usr/local/apisix/logs/error.log
       "
     networks:
       - gateway-net
     depends_on:
-      - gofiber-backend
-      - wordpress
+      wordpress:
+        condition: service_healthy
+      gofiber-backend:
+        condition: service_healthy
+
+  mariadb:
+    image: mariadb:10.6
+    container_name: mariadb
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: apisix_db
+      MYSQL_USER: apisix_user
+      MYSQL_PASSWORD: apisix_pass
+    ports:
+      - "3306:3306"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - gateway-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  wordpress:
+    image: wordpress:latest
+    container_name: wordpress
+    restart: unless-stopped
+    environment:
+      WORDPRESS_DB_HOST: mariadb
+      WORDPRESS_DB_USER: apisix_user
+      WORDPRESS_DB_PASSWORD: apisix_pass
+      WORDPRESS_DB_NAME: apisix_db
+      WORDPRESS_TABLE_PREFIX: wp_
+      # เพิ่ม environment สำหรับ WordPress
+      WORDPRESS_CONFIG_EXTRA: |
+        define('WP_DEBUG', true);
+        define('WP_DEBUG_LOG', true);
+        
+        // Enable REST API
+        add_filter('rest_enabled', '__return_true');
+        add_filter('rest_jsonp_enabled', '__return_true');
+        
+        // CORS headers for REST API
+        add_action('rest_api_init', function() {
+          remove_filter('rest_pre_serve_request', 'rest_send_cors_headers');
+          add_filter('rest_pre_serve_request', function($value) {
+            header('Access-Control-Allow-Origin: *');
+            header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
+            header('Access-Control-Allow-Headers: Origin, Content-Type, Accept, Authorization');
+            header('Access-Control-Allow-Credentials: false');
+            return $value;
+          });
+        });
+    ports:
+      - "8080:80"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    volumes:
+      - wordpress_data:/var/www/html
+      - ./wordpress-init.php:/tmp/wordpress-init.php:ro
+    networks:
+      - gateway-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/wp-json/wp/v2/posts"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  gofiber-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gofiber-backend
+    restart: unless-stopped
+    environment:
+      DB_HOST: mariadb
+      DB_PORT: 3306
+      DB_USER: apisix_user
+      DB_PASSWORD: apisix_pass
+      DB_NAME: apisix_db
+      PORT: 3000
+      ENVIRONMENT: production
+      DEBUG: false
+      # เพิ่ม CORS settings
+      ENABLE_CORS: true
+    ports:
+      - "3000:3000"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    networks:
+      - gateway-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   apisix-dashboard:
     build:
@@ -105,8 +154,10 @@ services:
       - "5173:5173"
     environment:
       - NODE_ENV=production
+      - VITE_API_BASE_URL=http://localhost:9080
     depends_on:
-      - apisix_api
+      apisix_api:
+        condition: service_started
     networks:
       - gateway-net
 
