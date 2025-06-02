@@ -228,30 +228,75 @@ export const api = {
     throw new Error('Upstream deletion is not supported in standalone mode.');
   },
 
-  // API testing with fallback strategies
+  // WordPress API testing with better error handling
   testWordPressAPI: async () => {
-    const testEndpoints = [
-      `${APISIX_GATEWAY_URL}/api/posts`,  // Through APISIX
-      `http://${window.location.hostname}:8080/wp-json/wp/v2/posts`,  // Direct access
-    ];
-
-    for (const endpoint of testEndpoints) {
+    console.log('Testing WordPress API...');
+    
+    try {
+      // Test WordPress installation first
+      console.log('Testing WordPress installation...');
+      const wpResponse = await axios.get(`http://${window.location.hostname}:8080`, { 
+        timeout: 5000,
+        maxRedirects: 0,
+        validateStatus: function (status) {
+          return status >= 200 && status < 400; // Accept 2xx and 3xx
+        }
+      });
+      
+      // If WordPress redirects to install, it's not set up
+      if (wpResponse.status === 302 || wpResponse.request.responseURL?.includes('wp-admin/install.php')) {
+        throw new Error('WordPress setup required. Please visit http://localhost:8080 to complete installation');
+      }
+      
+      console.log('WordPress appears to be installed, testing REST API...');
+      
+      // Test through APISIX first
       try {
-        console.log(`Testing WordPress at: ${endpoint}`);
-        const response = await axios.get(endpoint, { 
+        console.log('Testing WordPress API through APISIX...');
+        const apisixResponse = await axios.get(`${APISIX_GATEWAY_URL}/api/posts`, { 
           timeout: 5000,
           headers: {
             'Accept': 'application/json',
           }
         });
-        console.log(`WordPress API working at: ${endpoint}`);
-        return response.data;
-      } catch (error) {
-        console.warn(`WordPress test failed for ${endpoint}:`, error.message);
-        if (endpoint === testEndpoints[testEndpoints.length - 1]) {
-          throw new Error('WordPress API is not accessible through any endpoint');
+        console.log('WordPress API working through APISIX:', apisixResponse.data);
+        return apisixResponse.data;
+      } catch (apisixError) {
+        console.warn('APISIX WordPress API failed:', apisixError.message);
+        
+        // Try direct access
+        try {
+          console.log('Testing WordPress API directly...');
+          const directResponse = await axios.get(`http://${window.location.hostname}:8080/wp-json/wp/v2/posts`, { 
+            timeout: 5000,
+            headers: {
+              'Accept': 'application/json',
+            }
+          });
+          console.log('WordPress API working directly:', directResponse.data);
+          return directResponse.data;
+        } catch (directError) {
+          console.warn('Direct WordPress API failed:', directError.message);
+          
+          // Check if it's a 404 (no posts) vs actual error
+          if (directError.response?.status === 404) {
+            throw new Error('WordPress REST API endpoint not found. This usually means: 1) WordPress is not fully installed, 2) Permalinks need to be reset, or 3) No posts exist yet');
+          }
+          
+          throw new Error('WordPress REST API is not accessible. Please check WordPress installation and REST API settings');
         }
       }
+    } catch (error) {
+      if (error.message.includes('setup required') || error.message.includes('install')) {
+        throw error; // Re-throw setup errors as-is
+      }
+      
+      // For network errors
+      if (error.code === 'ECONNREFUSED' || error.message.includes('Network Error')) {
+        throw new Error('Cannot connect to WordPress. Please check if WordPress container is running');
+      }
+      
+      throw new Error(`WordPress API test failed: ${error.message}`);
     }
   },
 

@@ -1,39 +1,6 @@
 version: '3.9'
 
 services:
-  apisix_api:
-    image: apache/apisix:3.9.1-debian
-    container_name: apisix_api
-    ports:
-      - "9080:9080"
-      - "9180:9180"
-    volumes:
-      - ./apisix/config.yaml:/usr/local/apisix/conf/config.yaml
-      - ./apisix/apisix.yaml:/usr/local/apisix/conf/apisix.yaml
-    environment:
-      - APISIX_STAND_ALONE=true
-    restart: unless-stopped
-    command: >
-      sh -c "
-        echo 'Starting APISIX in standalone mode...' &&
-        echo 'Config files:' &&
-        ls -la /usr/local/apisix/conf/ &&
-        echo 'Config content:' &&
-        cat /usr/local/apisix/conf/config.yaml &&
-        echo 'Routes content:' &&
-        cat /usr/local/apisix/conf/apisix.yaml &&
-        /usr/bin/apisix init &&
-        /usr/bin/apisix start -c /usr/local/apisix/conf/config.yaml &&
-        tail -f /dev/null
-      "
-    networks:
-      - gateway-net
-    depends_on:
-      wordpress:
-        condition: service_healthy
-      gofiber-backend:
-        condition: service_healthy
-
   mariadb:
     image: mariadb:10.6
     container_name: mariadb
@@ -50,38 +17,6 @@ services:
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
       - gateway-net
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 90s
-
-  wordpress:
-    image: wordpress:latest
-    container_name: wordpress
-    restart: unless-stopped
-    environment:
-      WORDPRESS_DB_HOST: mariadb
-      WORDPRESS_DB_USER: apisix_user
-      WORDPRESS_DB_PASSWORD: apisix_pass
-      WORDPRESS_DB_NAME: apisix_db
-      WORDPRESS_TABLE_PREFIX: wp_
-    ports:
-      - "8080:80"
-    depends_on:
-      mariadb:
-        condition: service_healthy
-    volumes:
-      - wordpress_data:/var/www/html
-    networks:
-      - gateway-net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 120s
 
   gofiber-backend:
     build:
@@ -98,19 +33,67 @@ services:
       PORT: 3000
       ENVIRONMENT: production
       DEBUG: false
+      ENABLE_SAMPLE_DATA: true
     ports:
       - "3000:3000"
     depends_on:
-      mariadb:
-        condition: service_healthy
+      - mariadb
     networks:
       - gateway-net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+
+  wordpress:
+    image: wordpress:latest
+    container_name: wordpress
+    restart: unless-stopped
+    environment:
+      WORDPRESS_DB_HOST: mariadb
+      WORDPRESS_DB_USER: apisix_user
+      WORDPRESS_DB_PASSWORD: apisix_pass
+      WORDPRESS_DB_NAME: apisix_db
+      WORDPRESS_TABLE_PREFIX: wp_
+    ports:
+      - "8080:80"
+    depends_on:
+      - mariadb
+    volumes:
+      - wordpress_data:/var/www/html
+    networks:
+      - gateway-net
+
+  apisix_api:
+    image: apache/apisix:3.9.1-debian
+    container_name: apisix_api
+    ports:
+      - "9080:9080"
+      - "9180:9180"
+    volumes:
+      - ./apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
+      - ./apisix/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
+    environment:
+      - APISIX_STAND_ALONE=true
+    restart: unless-stopped
+    command: >
+      sh -c "
+        echo '=== APISIX Standalone Setup ===' &&
+        echo 'Waiting for backends (30s)...' &&
+        sleep 30 &&
+        echo 'Checking config files...' &&
+        ls -la /usr/local/apisix/conf/ &&
+        echo 'Config content:' &&
+        cat /usr/local/apisix/conf/config.yaml &&
+        echo 'Routes content:' &&
+        cat /usr/local/apisix/conf/apisix.yaml &&
+        echo 'Starting APISIX...' &&
+        /usr/bin/apisix init &&
+        /usr/bin/apisix start &&
+        echo 'APISIX started successfully!' &&
+        tail -f /usr/local/apisix/logs/error.log
+      "
+    networks:
+      - gateway-net
+    depends_on:
+      - gofiber-backend
+      - wordpress
 
   apisix-dashboard:
     build:

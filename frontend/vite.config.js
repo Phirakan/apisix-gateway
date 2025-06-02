@@ -11,6 +11,13 @@ export default defineConfig({
   server: {
     port: 5173,
     host: '0.0.0.0', // Allow external connections
+    proxy: {
+      '/wp-json': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/wp-json/, '/wp-json'),
+      }
+    }
   },
   preview: {
     port: 5173,
