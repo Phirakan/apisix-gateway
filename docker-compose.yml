@@ -76,26 +76,6 @@ services:
       WORDPRESS_DB_PASSWORD: apisix_pass
       WORDPRESS_DB_NAME: apisix_db
       WORDPRESS_TABLE_PREFIX: wp_
-      # เพิ่ม environment สำหรับ WordPress
-      WORDPRESS_CONFIG_EXTRA: |
-        define('WP_DEBUG', true);
-        define('WP_DEBUG_LOG', true);
-        
-        // Enable REST API
-        add_filter('rest_enabled', '__return_true');
-        add_filter('rest_jsonp_enabled', '__return_true');
-        
-        // CORS headers for REST API
-        add_action('rest_api_init', function() {
-          remove_filter('rest_pre_serve_request', 'rest_send_cors_headers');
-          add_filter('rest_pre_serve_request', function($value) {
-            header('Access-Control-Allow-Origin: *');
-            header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-            header('Access-Control-Allow-Headers: Origin, Content-Type, Accept, Authorization');
-            header('Access-Control-Allow-Credentials: false');
-            return $value;
-          });
-        });
     ports:
       - "8080:80"
     depends_on:
@@ -103,11 +83,10 @@ services:
         condition: service_healthy
     volumes:
       - wordpress_data:/var/www/html
-      - ./wordpress-init.php:/tmp/wordpress-init.php:ro
     networks:
       - gateway-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/wp-json/wp/v2/posts"]
+      test: ["CMD-SHELL", "curl -f http://localhost/ || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -128,7 +107,6 @@ services:
       PORT: 3000
       ENVIRONMENT: production
       DEBUG: false
-      # เพิ่ม CORS settings
       ENABLE_CORS: true
     ports:
       - "3000:3000"
@@ -138,11 +116,11 @@ services:
     networks:
       - gateway-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
       interval: 15s
       timeout: 5s
-      retries: 3
-      start_period: 30s
+      retries: 5
+      start_period: 60s
 
   apisix-dashboard:
     build:

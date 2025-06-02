@@ -1,17 +1,23 @@
 # apisix/config.yaml
 apisix:
-  node_listen: 9080
-  enable_admin: false
-  config_center: yaml
+  node_listen: 9080                # Gateway port
+  enable_admin: false              # ปิด Admin API ใน standalone mode
+  config_center: yaml             # ใช้ YAML config
   extra_lua_path: ""
   extra_lua_cpath: ""
+  router:
+    http: radixtree_uri           # Router engine
+    ssl: radixtree_sni
+  
+  # Standalone mode configuration
+  config_file: "/usr/local/apisix/conf/apisix.yaml"
   
 deployment:
-  role: data_plane
+  role: data_plane                 # ใช้เป็น data plane
   role_data_plane:
-    config_provider: yaml
+    config_provider: yaml         # โหลด config จาก YAML
 
-# เพิ่ม plugins ที่จำเป็น
+# Enable plugins ที่จำเป็น
 plugins:
   - public-api
   - cors
@@ -20,37 +26,25 @@ plugins:
   - limit-req
   - limit-count
   - real-ip
-  - response-rewrite
+  - server-info
+  - http-logger
 
-plugin_attr:
-  # CORS settings
-  cors:
-    max_age: 86400
-    
+# Nginx configuration
 nginx_config:
-  user: root
-  worker_processes: auto
-  error_log: /usr/local/apisix/logs/error.log warn
+  error_log: "/tmp/error.log"
+  error_log_level: "info"
+  worker_processes: "auto"
   worker_rlimit_nofile: 20480
-  
-  events:
-    accept_mutex: off
+  event:
     worker_connections: 10620
-    
   http:
-    access_log: /usr/local/apisix/logs/access.log
+    access_log: "/tmp/access.log"
     keepalive_timeout: 60s
-    keepalive_requests: 1000
+    client_header_timeout: 60s
+    client_body_timeout: 60s
     send_timeout: 10s
-    
-    # เพิ่ม CORS headers ที่ nginx level
-    custom_headers:
-      - name: Access-Control-Allow-Origin
-        value: "*"
-        always: true
-      - name: Access-Control-Allow-Methods
-        value: "GET, POST, PUT, DELETE, OPTIONS"
-        always: true
-      - name: Access-Control-Allow-Headers
-        value: "Origin, Content-Type, Accept, Authorization"
-        always: true
+    underscores_in_headers: "on"
+    real_ip_header: "X-Real-IP"
+    real_ip_from:
+      - 127.0.0.1
+      - 'unix:'
