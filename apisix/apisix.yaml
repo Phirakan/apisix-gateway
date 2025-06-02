@@ -1,0 +1,6 @@
+routes:
+  - uri: /api/*
+    upstream:
+      type: roundrobin
+      nodes:
+        "gofiber-backend:3000": 1
