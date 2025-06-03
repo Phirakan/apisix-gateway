@@ -1,8 +1,8 @@
 routes:
   - id: 1
-    name: "GoFiber Health Check"
-    desc: "Health check endpoint for GoFiber backend"
-    uri: "/api/health"
+    name: "APISIX Root Health"
+    desc: "Root endpoint for APISIX health check"
+    uri: "/"
     methods:
       - GET
       - OPTIONS
@@ -24,33 +24,6 @@ routes:
         max_age: 86400
 
   - id: 2
-    name: "GoFiber Data API"
-    desc: "GoFiber backend data operations"
-    uri: "/api/data/*"
-    methods:
-      - GET
-      - POST
-      - PUT
-      - DELETE
-      - OPTIONS
-    upstream:
-      type: roundrobin
-      nodes:
-        "gofiber-backend:3000": 1
-      timeout:
-        connect: 6
-        send: 6
-        read: 6
-    plugins:
-      cors:
-        allow_credentials: false
-        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With,X-API-Key"
-        allow_methods: "GET,POST,PUT,DELETE,OPTIONS"
-        allow_origins: "*"
-        expose_headers: "Content-Length,X-Total-Count"
-        max_age: 86400
-
-  - id: 3
     name: "WordPress Posts API"
     desc: "WordPress REST API for posts"
     uri: "/api/posts/*"
@@ -81,24 +54,106 @@ routes:
           - "^/api/posts(.*)"
           - "/wp-json/wp/v2/posts$1"
 
+  - id: 2
+    name: "GoFiber Health Check"
+    desc: "Health check endpoint for GoFiber backend"
+    uri: "/api/health"
+    methods:
+      - GET
+      - OPTIONS
+    upstream:
+      type: roundrobin
+      nodes:
+        "gofiber-backend:3000": 1
+      timeout:
+        connect: 6
+        send: 6
+        read: 6
+    plugins:
+      cors:
+        allow_credentials: false
+        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With"
+        allow_methods: "GET,OPTIONS"
+        allow_origins: "*"
+        expose_headers: "Content-Length,X-Total-Count"
+        max_age: 86400
+
+  - id: 3
+    name: "GoFiber Data API"
+    desc: "GoFiber backend data operations"
+    uri: "/api/data/*"
+    methods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - OPTIONS
+    upstream:
+      type: roundrobin
+      nodes:
+        "gofiber-backend:3000": 1
+      timeout:
+        connect: 6
+        send: 6
+        read: 6
+    plugins:
+      cors:
+        allow_credentials: false
+        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With,X-API-Key"
+        allow_methods: "GET,POST,PUT,DELETE,OPTIONS"
+        allow_origins: "*"
+        expose_headers: "Content-Length,X-Total-Count"
+        max_age: 86400
+
+  - id: 4
+    name: "My WP API"
+    desc: "WordPress API route for wordpress"
+    uri: "/api/wp/*"
+    methods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - OPTIONS
+    upstream:
+      type: roundrobin
+      nodes:
+        "wordpress:80": 1
+      timeout:
+        connect: 6
+        send: 6
+        read: 6
+    plugins:
+      cors:
+        allow_credentials: false
+        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With"
+        allow_methods: "GET,POST,PUT,DELETE,OPTIONS"
+        allow_origins: "*"
+        expose_headers: "Content-Length,X-Total-Count"
+        max_age: 86400
+      proxy-rewrite:
+        regex_uri:
+          - "^/api/wp/(.*)"
+          - "/wp-json/wp/v2/posts$1"
+
 upstreams:
   - id: 1
-    name: "GoFiber Upstream"
-    desc: "Upstream for GoFiber backend container"
+    name: "WordPress Upstream"
+    desc: "Upstream for WordPress container"
     type: roundrobin
     nodes:
-      "gofiber-backend:3000": 1
+      "wordpress:80": 1
     timeout:
       connect: 6
       send: 6
       read: 6
 
   - id: 2
-    name: "WordPress Upstream"
-    desc: "Upstream for WordPress container"
+    name: "GoFiber Upstream"
+    desc: "Upstream for GoFiber backend container"
     type: roundrobin
     nodes:
-      "wordpress:80": 1
+      "gofiber-backend:3000": 1
     timeout:
       connect: 6
       send: 6
