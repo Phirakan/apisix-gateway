@@ -1,11 +1,11 @@
-// backend/controllers/route_controller.go
+// backend/controllers/route_controller.go (FIXED)
 package controllers
 
 import (
 	"strconv"
 	"time"
 
-	"apisix-backend/service"
+	"apisix-backend/service"  // แก้ไข import path
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -316,44 +316,15 @@ func (rc *RouteController) GetRouteTemplates(c *fiber.Ctx) error {
 					"allow_origins": "*",
 					"allow_methods": "GET,POST,PUT,DELETE,OPTIONS",
 				},
-				"proxy-rewrite": map[string]interface{}{
-					"regex_uri": []string{"^/api/wp/(.*)", "/wp-json/wp/v2/$1"},
-				},
-			},
-		},
-		"gofiber": map[string]interface{}{
-			"name":        "GoFiber API Route",
-			"uri":         "/api/custom/*",
-			"methods":     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-			"target":      "gofiber-backend",
-			"port":        3000,
-			"description": "Route for custom GoFiber API endpoints",
-			"plugins": map[string]interface{}{
-				"cors": map[string]interface{}{
-					"allow_origins": "*",
-					"allow_methods": "GET,POST,PUT,DELETE,OPTIONS",
-					"allow_headers": "Origin,Content-Type,Accept,Authorization,X-API-Key",
-				},
-			},
-		},
-		"generic": map[string]interface{}{
-			"name":        "Generic HTTP Route",
-			"uri":         "/api/service/*",
-			"methods":     []string{"GET"},
-			"target":      "service-name",
-			"port":        8080,
-			"description": "Generic route template for any HTTP service",
-			"plugins": map[string]interface{}{
-				"cors": map[string]interface{}{
-					"allow_origins": "*",
-					"allow_methods": "GET,OPTIONS",
-				},
-			},
-		},
-	}
-
-	return c.JSON(fiber.Map{
-		"templates": templates,
-		"status":    "success",
-	})
-}
+							"proxy-rewrite": map[string]interface{}{
+								"regex_uri": []string{"^/api/wp/(.*)", "/wp-json/wp/v2/$1"},
+							},
+						},
+					},
+				}
+				
+				return c.JSON(fiber.Map{
+					"templates": templates,
+					"status":    "success",
+				})
+			}

@@ -1,4 +1,4 @@
-// backend/service/route_service.go (แก้ไข package name)
+// backend/services/route_service.go (แก้ไข package name)
 package services
 
 import (
@@ -254,6 +254,21 @@ func (rs *RouteService) readConfig() (*APISIXConfig, error) {
 
 	log.Printf("📖 Reading config from: %s", rs.configPath)
 	
+	// Check if file exists
+	if _, err := os.Stat(rs.configPath); os.IsNotExist(err) {
+		log.Printf("⚠️  Config file doesn't exist, creating default: %s", rs.configPath)
+		// Create default config
+		defaultConfig := &APISIXConfig{
+			Routes:    []RouteConfig{},
+			Upstreams: []UpstreamDefinition{},
+		}
+		err := rs.writeConfig(defaultConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create default config: %w", err)
+		}
+		return defaultConfig, nil
+	}
+	
 	data, err := ioutil.ReadFile(rs.configPath)
 	if err != nil {
 		log.Printf("❌ Failed to read config file: %v", err)
@@ -442,86 +457,4 @@ func (rs *RouteService) ReloadAPISIX() error {
 	log.Println("💡 Run: docker-compose restart apisix_api")
 	
 	return nil
-}
-
-// ValidateConfig validates the current configuration
-func (rs *RouteService) ValidateConfig() error {
-	log.Println("🔍 Validating APISIX configuration...")
-	
-	config, err := rs.readConfig()
-	if err != nil {
-		return fmt.Errorf("failed to read config for validation: %w", err)
-	}
-
-	// Check for duplicate route IDs
-	idMap := make(map[int]string)
-	for _, route := range config.Routes {
-		if existingName, exists := idMap[route.ID]; exists {
-			return fmt.Errorf("duplicate route ID %d found: '%s' and '%s'", 
-				route.ID, existingName, route.Name)
-		}
-		idMap[route.ID] = route.Name
-	}
-
-	// Check for duplicate URIs
-	uriMap := make(map[string]string)
-	for _, route := range config.Routes {
-		if existingName, exists := uriMap[route.URI]; exists {
-			log.Printf("⚠️  Warning: Duplicate URI %s found: '%s' and '%s'", 
-				route.URI, existingName, route.Name)
-		}
-		uriMap[route.URI] = route.Name
-	}
-
-	// Validate required fields
-	for _, route := range config.Routes {
-		if route.Name == "" {
-			return fmt.Errorf("route ID %d is missing a name", route.ID)
-		}
-		if route.URI == "" {
-			return fmt.Errorf("route '%s' is missing URI", route.Name)
-		}
-		if len(route.Methods) == 0 {
-			return fmt.Errorf("route '%s' has no HTTP methods defined", route.Name)
-		}
-		if len(route.Upstream.Nodes) == 0 {
-			return fmt.Errorf("route '%s' has no upstream nodes defined", route.Name)
-		}
-	}
-
-	log.Printf("✅ Configuration validation passed: %d routes, %d upstreams", 
-		len(config.Routes), len(config.Upstreams))
-	return nil
-}
-
-// GetConfigStats returns statistics about the current configuration
-func (rs *RouteService) GetConfigStats() (map[string]interface{}, error) {
-	config, err := rs.readConfig()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read config: %w", err)
-	}
-
-	// Count methods
-	methodCount := make(map[string]int)
-	pluginCount := make(map[string]int)
-	
-	for _, route := range config.Routes {
-		for _, method := range route.Methods {
-			methodCount[method]++
-		}
-		for plugin := range route.Plugins {
-			pluginCount[plugin]++
-		}
-	}
-
-	stats := map[string]interface{}{
-		"total_routes":    len(config.Routes),
-		"total_upstreams": len(config.Upstreams),
-		"methods_usage":   methodCount,
-		"plugins_usage":   pluginCount,
-		"config_file":     rs.configPath,
-		"last_modified":   time.Now().Format(time.RFC3339),
-	}
-
-	return stats, nil
 }

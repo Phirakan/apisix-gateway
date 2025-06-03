@@ -1,4 +1,4 @@
-// backend/routes/routes.go (Updated with Route Management)
+// backend/routes/routes.go (Fixed imports)
 package routes
 
 import (
@@ -12,7 +12,7 @@ import (
 func SetupRoutes(app *fiber.App, db *gorm.DB) {
 	// สร้าง controller instances
 	recordController := controllers.NewRecordController(db)
-	routeController := controllers.NewRouteController() // ใหม่: Route Management
+	routeController := controllers.NewRouteController() // Route Management
 
 	// API group
 	api := app.Group("/api")

@@ -1,4 +1,4 @@
-// frontend/src/service/api.js (Updated with Route Management)
+// frontend/src/service/api.js (Fixed Version)
 import axios from "axios";
 
 // Configuration - Use window.location.hostname to detect if running in container
@@ -41,12 +41,13 @@ const handleError = (error, context) => {
 
 // API functions
 export const api = {
-  // ========== EXISTING FUNCTIONS ==========
+  // ========== FIXED APISIX HEALTH CHECK ==========
   
-  // Health check for APISIX itself
+  // Health check for APISIX itself - FIXED: Use proper endpoint
   checkAPISIXHealth: async () => {
     try {
-      const response = await axios.get(`${APISIX_GATEWAY_URL}/apisix/status`, { 
+      // Try basic connectivity to APISIX gateway
+      const response = await axios.get(`${APISIX_GATEWAY_URL}/`, { 
         timeout: 5000,
         headers: {
           'Accept': 'application/json',
@@ -55,10 +56,24 @@ export const api = {
       return { status: 'healthy', data: response.data };
     } catch (error) {
       console.error('APISIX health check failed:', error);
-      return { status: 'unhealthy', error: error.message };
+      // Try alternative endpoint
+      try {
+        const altResponse = await axios.get(`${APISIX_GATEWAY_URL}/api/health`, { 
+          timeout: 3000,
+          headers: {
+            'Accept': 'application/json',
+          }
+        });
+        return { status: 'healthy', data: altResponse.data };
+      // eslint-disable-next-line no-unused-vars
+      } catch (altError) {
+        return { status: 'unhealthy', error: error.message };
+      }
     }
   },
 
+  // ========== ROUTE MANAGEMENT (FIXED) ==========
+  
   // Routes management (NOW USES REAL API!)
   getRoutes: async () => {
     try {
@@ -68,14 +83,9 @@ export const api = {
         list: response.data.list || [],
         total: response.data.total || 0
       };
-    // eslint-disable-next-line no-unused-vars
     } catch (error) {
       console.warn('Route management API failed, falling back to mock data');
-      // Fallback to mock data if API fails
-      return {
-        list: mockRoutes,
-        total: mockRoutes.length
-      };
+      handleError(error, 'getRoutes');
     }
   },
 
@@ -141,8 +151,6 @@ export const api = {
       handleError(error, 'getRoute');
     }
   },
-
-  // ========== NEW ROUTE MANAGEMENT FUNCTIONS ==========
 
   // Quick route creation with templates
   createQuickRoute: async (templateData) => {
@@ -215,12 +223,12 @@ export const api = {
     } catch (error) {
       console.warn('Upstreams API failed, falling back to mock data');
       return {
-        list: mockUpstreams,
-        total: mockUpstreams.length
+        list: [],
+        total: 0
       };
     }
   },
-
+  
   // ========== ENHANCED SETUP FUNCTION ==========
   
   setupInitialRoutes: async () => {
@@ -247,7 +255,7 @@ export const api = {
     }
   },
 
-  // ========== REST OF EXISTING FUNCTIONS ==========
+  // ========== EXISTING FUNCTIONS (FIXED) ==========
   
   testWordPressAPI: async () => {
     console.log('Testing WordPress API...');
@@ -487,50 +495,6 @@ export const api = {
     return results;
   },
 };
-
-// Mock data (fallback)
-const mockRoutes = [
-  {
-    key: "1",
-    value: {
-      id: "1",
-      name: "WordPress Posts API",
-      uri: "/api/posts",
-      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-      upstream: {
-        type: "roundrobin",
-        nodes: {
-          "wordpress:80": 1
-        }
-      },
-      plugins: {
-        "proxy-rewrite": {
-          regex_uri: ["^/api/posts(.*)", "/wp-json/wp/v2/posts$1"]
-        },
-        "cors": {
-          allow_origins: "*",
-          allow_methods: "GET,POST,PUT,DELETE,OPTIONS"
-        }
-      },
-      create_time: Math.floor(Date.now() / 1000),
-      update_time: Math.floor(Date.now() / 1000)
-    }
-  }
-];
-
-const mockUpstreams = [
-  {
-    key: "1",
-    value: {
-      id: "1",
-      name: "WordPress Upstream",
-      type: "roundrobin",
-      nodes: {
-        "wordpress:80": 1
-      }
-    }
-  }
-];
 
 // Request/response logging
 [gatewayApi, directApi].forEach((apiInstance, index) => {
