@@ -1,7 +1,8 @@
 routes:
+  # Route 1: Root endpoint - ส่งไปยัง GoFiber root
   - id: 1
-    name: "APISIX Root Health"
-    desc: "Root endpoint for APISIX health check"
+    name: "APISIX Root"
+    desc: "Root endpoint showing API information"
     uri: "/"
     methods:
       - GET
@@ -23,10 +24,64 @@ routes:
         expose_headers: "Content-Length,X-Total-Count"
         max_age: 86400
 
+  # Route 2: GoFiber Health Check
   - id: 2
+    name: "GoFiber Health Check"
+    desc: "Health check endpoint for GoFiber backend"
+    uri: "/api/health"
+    methods:
+      - GET
+      - OPTIONS
+    upstream:
+      type: roundrobin
+      nodes:
+        "gofiber-backend:3000": 1
+      timeout:
+        connect: 6
+        send: 6
+        read: 6
+    plugins:
+      cors:
+        allow_credentials: false
+        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With"
+        allow_methods: "GET,OPTIONS"
+        allow_origins: "*"
+        expose_headers: "Content-Length,X-Total-Count"
+        max_age: 86400
+
+  # Route 3: GoFiber Data API
+  - id: 3
+    name: "GoFiber Data API"
+    desc: "GoFiber backend data operations"
+    uri: "/api/data*"
+    methods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - OPTIONS
+    upstream:
+      type: roundrobin
+      nodes:
+        "gofiber-backend:3000": 1
+      timeout:
+        connect: 6
+        send: 6
+        read: 6
+    plugins:
+      cors:
+        allow_credentials: false
+        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With,X-API-Key"
+        allow_methods: "GET,POST,PUT,DELETE,OPTIONS"
+        allow_origins: "*"
+        expose_headers: "Content-Length,X-Total-Count"
+        max_age: 86400
+
+  # Route 4: WordPress Posts API
+  - id: 4
     name: "WordPress Posts API"
     desc: "WordPress REST API for posts"
-    uri: "/api/posts/*"
+    uri: "/api/posts*"
     methods:
       - GET
       - POST
@@ -54,60 +109,10 @@ routes:
           - "^/api/posts(.*)"
           - "/wp-json/wp/v2/posts$1"
 
-  - id: 2
-    name: "GoFiber Health Check"
-    desc: "Health check endpoint for GoFiber backend"
-    uri: "/api/health"
-    methods:
-      - GET
-      - OPTIONS
-    upstream:
-      type: roundrobin
-      nodes:
-        "gofiber-backend:3000": 1
-      timeout:
-        connect: 6
-        send: 6
-        read: 6
-    plugins:
-      cors:
-        allow_credentials: false
-        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With"
-        allow_methods: "GET,OPTIONS"
-        allow_origins: "*"
-        expose_headers: "Content-Length,X-Total-Count"
-        max_age: 86400
-
-  - id: 3
-    name: "GoFiber Data API"
-    desc: "GoFiber backend data operations"
-    uri: "/api/data/*"
-    methods:
-      - GET
-      - POST
-      - PUT
-      - DELETE
-      - OPTIONS
-    upstream:
-      type: roundrobin
-      nodes:
-        "gofiber-backend:3000": 1
-      timeout:
-        connect: 6
-        send: 6
-        read: 6
-    plugins:
-      cors:
-        allow_credentials: false
-        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With,X-API-Key"
-        allow_methods: "GET,POST,PUT,DELETE,OPTIONS"
-        allow_origins: "*"
-        expose_headers: "Content-Length,X-Total-Count"
-        max_age: 86400
-
-  - id: 4
-    name: "My WP API"
-    desc: "WordPress API route for wordpress"
+  # Route 5: WordPress General API
+  - id: 5
+    name: "WordPress Custom API"
+    desc: "WordPress API route for custom endpoints"
     uri: "/api/wp/*"
     methods:
       - GET
@@ -134,7 +139,35 @@ routes:
       proxy-rewrite:
         regex_uri:
           - "^/api/wp/(.*)"
-          - "/wp-json/wp/v2/posts$1"
+          - "/wp-json/wp/v2/$1"
+
+  # Route 6: GoFiber Route Management API
+  - id: 6
+    name: "Route Management API"
+    desc: "Dynamic route management endpoints"
+    uri: "/api/routes*"
+    methods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - OPTIONS
+    upstream:
+      type: roundrobin
+      nodes:
+        "gofiber-backend:3000": 1
+      timeout:
+        connect: 6
+        send: 6
+        read: 6
+    plugins:
+      cors:
+        allow_credentials: false
+        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With"
+        allow_methods: "GET,POST,PUT,DELETE,OPTIONS"
+        allow_origins: "*"
+        expose_headers: "Content-Length,X-Total-Count"
+        max_age: 86400
 
 upstreams:
   - id: 1
