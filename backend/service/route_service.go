@@ -1,4 +1,4 @@
-// backend/services/route_service.go (แก้ไข package name)
+// backend/services/route_service.go (แก้ไข File Handling)
 package services
 
 import (
@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v2"
@@ -55,12 +56,13 @@ type APISIXConfig struct {
 // RouteService handles route management operations
 type RouteService struct {
 	configPath string
+	mutex      sync.RWMutex // เพิ่ม mutex สำหรับ thread safety
 }
 
 // NewRouteService creates a new RouteService instance
 func NewRouteService(configPath string) *RouteService {
 	if configPath == "" {
-		configPath = "/app/apisix.yaml" // Updated default path
+		configPath = "/app/apisix.yaml"
 	}
 	
 	log.Printf("📁 Route service initialized with config path: %s", configPath)
@@ -72,9 +74,12 @@ func NewRouteService(configPath string) *RouteService {
 
 // GetRoutes reads and returns all routes from APISIX config
 func (rs *RouteService) GetRoutes() ([]RouteConfig, error) {
+	rs.mutex.RLock()
+	defer rs.mutex.RUnlock()
+	
 	log.Println("📖 Reading routes from configuration...")
 	
-	config, err := rs.readConfig()
+	config, err := rs.readConfigUnsafe()
 	if err != nil {
 		log.Printf("❌ Failed to read routes config: %v", err)
 		return nil, fmt.Errorf("failed to read config: %w", err)
@@ -86,9 +91,12 @@ func (rs *RouteService) GetRoutes() ([]RouteConfig, error) {
 
 // GetUpstreams reads and returns all upstreams from APISIX config
 func (rs *RouteService) GetUpstreams() ([]UpstreamDefinition, error) {
+	rs.mutex.RLock()
+	defer rs.mutex.RUnlock()
+	
 	log.Println("📖 Reading upstreams from configuration...")
 	
-	config, err := rs.readConfig()
+	config, err := rs.readConfigUnsafe()
 	if err != nil {
 		log.Printf("❌ Failed to read upstreams config: %v", err)
 		return nil, fmt.Errorf("failed to read config: %w", err)
@@ -100,9 +108,12 @@ func (rs *RouteService) GetUpstreams() ([]UpstreamDefinition, error) {
 
 // AddRoute adds a new route to the configuration
 func (rs *RouteService) AddRoute(route RouteConfig) error {
+	rs.mutex.Lock()
+	defer rs.mutex.Unlock()
+	
 	log.Printf("➕ Adding new route: %s", route.Name)
 	
-	config, err := rs.readConfig()
+	config, err := rs.readConfigUnsafe()
 	if err != nil {
 		return fmt.Errorf("failed to read config: %w", err)
 	}
@@ -143,7 +154,7 @@ func (rs *RouteService) AddRoute(route RouteConfig) error {
 	// Add the new route
 	config.Routes = append(config.Routes, route)
 	
-	err = rs.writeConfig(config)
+	err = rs.writeConfigUnsafe(config)
 	if err != nil {
 		log.Printf("❌ Failed to write config after adding route: %v", err)
 		return err
@@ -155,9 +166,12 @@ func (rs *RouteService) AddRoute(route RouteConfig) error {
 
 // UpdateRoute updates an existing route
 func (rs *RouteService) UpdateRoute(id int, updatedRoute RouteConfig) error {
+	rs.mutex.Lock()
+	defer rs.mutex.Unlock()
+	
 	log.Printf("🔄 Updating route ID: %d", id)
 	
-	config, err := rs.readConfig()
+	config, err := rs.readConfigUnsafe()
 	if err != nil {
 		return fmt.Errorf("failed to read config: %w", err)
 	}
@@ -178,7 +192,7 @@ func (rs *RouteService) UpdateRoute(id int, updatedRoute RouteConfig) error {
 		return fmt.Errorf("route with ID %d not found", id)
 	}
 
-	err = rs.writeConfig(config)
+	err = rs.writeConfigUnsafe(config)
 	if err != nil {
 		log.Printf("❌ Failed to write config after updating route: %v", err)
 		return err
@@ -190,9 +204,12 @@ func (rs *RouteService) UpdateRoute(id int, updatedRoute RouteConfig) error {
 
 // DeleteRoute removes a route from the configuration
 func (rs *RouteService) DeleteRoute(id int) error {
+	rs.mutex.Lock()
+	defer rs.mutex.Unlock()
+	
 	log.Printf("🗑️ Deleting route ID: %d", id)
 	
-	config, err := rs.readConfig()
+	config, err := rs.readConfigUnsafe()
 	if err != nil {
 		return fmt.Errorf("failed to read config: %w", err)
 	}
@@ -217,7 +234,7 @@ func (rs *RouteService) DeleteRoute(id int) error {
 
 	config.Routes = newRoutes
 	
-	err = rs.writeConfig(config)
+	err = rs.writeConfigUnsafe(config)
 	if err != nil {
 		log.Printf("❌ Failed to write config after deleting route: %v", err)
 		return err
@@ -229,9 +246,12 @@ func (rs *RouteService) DeleteRoute(id int) error {
 
 // GetRoute returns a specific route by ID
 func (rs *RouteService) GetRoute(id int) (*RouteConfig, error) {
+	rs.mutex.RLock()
+	defer rs.mutex.RUnlock()
+	
 	log.Printf("🔍 Looking for route ID: %d", id)
 	
-	config, err := rs.readConfig()
+	config, err := rs.readConfigUnsafe()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config: %w", err)
 	}
@@ -247,11 +267,8 @@ func (rs *RouteService) GetRoute(id int) (*RouteConfig, error) {
 	return nil, fmt.Errorf("route with ID %d not found", id)
 }
 
-// readConfig reads the APISIX configuration file
-func (rs *RouteService) readConfig() (*APISIXConfig, error) {
-	// Create backup before reading
-	rs.createBackup()
-
+// readConfigUnsafe reads the APISIX configuration file (ไม่มี mutex lock)
+func (rs *RouteService) readConfigUnsafe() (*APISIXConfig, error) {
 	log.Printf("📖 Reading config from: %s", rs.configPath)
 	
 	// Check if file exists
@@ -262,7 +279,7 @@ func (rs *RouteService) readConfig() (*APISIXConfig, error) {
 			Routes:    []RouteConfig{},
 			Upstreams: []UpstreamDefinition{},
 		}
-		err := rs.writeConfig(defaultConfig)
+		err := rs.writeConfigUnsafe(defaultConfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create default config: %w", err)
 		}
@@ -287,36 +304,71 @@ func (rs *RouteService) readConfig() (*APISIXConfig, error) {
 	return &config, nil
 }
 
-// writeConfig writes the configuration back to the file
-func (rs *RouteService) writeConfig(config *APISIXConfig) error {
+// writeConfigUnsafe writes the configuration back to the file (ไม่มี mutex lock)
+func (rs *RouteService) writeConfigUnsafe(config *APISIXConfig) error {
 	log.Printf("💾 Writing config to: %s", rs.configPath)
+	
+	// Create backup before writing
+	rs.createBackupUnsafe()
 	
 	data, err := yaml.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal YAML: %w", err)
 	}
 
-	// Write to temporary file first for atomic operation
-	tempFile := rs.configPath + ".tmp"
-	err = ioutil.WriteFile(tempFile, data, 0644)
+	// สำหรับ mounted volumes, ใช้วิธี direct write แทน rename
+	// เพื่อหลีกเลี่ยง "device or resource busy" error
+	err = rs.writeFileSafely(rs.configPath, data)
 	if err != nil {
-		return fmt.Errorf("failed to write temp file: %w", err)
-	}
-
-	// Atomic move
-	err = os.Rename(tempFile, rs.configPath)
-	if err != nil {
-		// Clean up temp file on error
-		os.Remove(tempFile)
-		return fmt.Errorf("failed to replace config file: %w", err)
+		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
 	log.Printf("✅ Successfully wrote config to: %s", rs.configPath)
 	return nil
 }
 
-// createBackup creates a backup of the current configuration
-func (rs *RouteService) createBackup() error {
+// writeFileSafely เขียนไฟล์อย่างปลอดภัยสำหรับ mounted volumes
+func (rs *RouteService) writeFileSafely(filepath string, data []byte) error {
+	// ลองใช้ temporary file approach ก่อน
+	tempFile := filepath + ".tmp"
+	
+	// เขียนไปยัง temp file
+	err := ioutil.WriteFile(tempFile, data, 0644)
+	if err != nil {
+		log.Printf("⚠️  Temp file write failed, trying direct write: %v", err)
+		// ถ้า temp file ไม่ได้ ให้เขียนตรงไปยังไฟล์เดิม
+		return ioutil.WriteFile(filepath, data, 0644)
+	}
+
+	// ลอง rename
+	err = os.Rename(tempFile, filepath)
+	if err != nil {
+		log.Printf("⚠️  Rename failed, using direct copy: %v", err)
+		
+		// อ่านจาก temp file และเขียนไปยังไฟล์เดิม
+		tempData, readErr := ioutil.ReadFile(tempFile)
+		if readErr != nil {
+			os.Remove(tempFile) // ลบ temp file
+			return fmt.Errorf("failed to read temp file: %w", readErr)
+		}
+		
+		writeErr := ioutil.WriteFile(filepath, tempData, 0644)
+		os.Remove(tempFile) // ลบ temp file เสมอ
+		
+		if writeErr != nil {
+			return fmt.Errorf("failed to write to target file: %w", writeErr)
+		}
+		
+		log.Println("✅ Used direct copy method successfully")
+		return nil
+	}
+
+	log.Println("✅ Used rename method successfully")
+	return nil
+}
+
+// createBackupUnsafe creates a backup of the current configuration (ไม่มี mutex lock)
+func (rs *RouteService) createBackupUnsafe() error {
 	if _, err := os.Stat(rs.configPath); os.IsNotExist(err) {
 		log.Println("ℹ️  No existing config file to backup")
 		return nil // No file to backup

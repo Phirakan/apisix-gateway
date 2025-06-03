@@ -9,17 +9,29 @@ services:
       - "9180:9180"
     volumes:
       - ./apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
-      - ./apisix/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:rw
+      - apisix_config_volume:/usr/local/apisix/conf  # ใช้ named volume แทน bind mount
     environment:
       - APISIX_STAND_ALONE=true
     restart: unless-stopped
     command: >
       sh -c "
         echo '=== APISIX Standalone Setup with Dynamic Route Management ===' &&
+        echo 'Copying initial config...' &&
+        cp /usr/local/apisix/conf/config.yaml /usr/local/apisix/conf/config.yaml.bak &&
+        echo 'Setting up apisix.yaml...' &&
+        if [ ! -f /usr/local/apisix/conf/apisix.yaml ]; then
+          echo 'Creating initial apisix.yaml...' &&
+          cat > /usr/local/apisix/conf/apisix.yaml << 'EOF'
+      routes: []
+      upstreams: []
+      EOF
+        else
+          echo 'Using existing apisix.yaml...' &&
+          cp /usr/local/apisix/conf/apisix.yaml /usr/local/apisix/conf/apisix.yaml.bak
+        fi &&
+        chmod 666 /usr/local/apisix/conf/apisix.yaml &&
         echo 'Waiting for backends (45s)...' &&
         sleep 45 &&
-        echo 'Checking config files...' &&
-        ls -la /usr/local/apisix/conf/ &&
         echo 'Starting APISIX...' &&
         /usr/bin/apisix init &&
         /usr/bin/apisix start &&
@@ -29,6 +41,8 @@ services:
         curl -s http://gofiber-backend:3000/api/health || echo 'GoFiber not ready yet' &&
         curl -s http://wordpress/wp-json/wp/v2/posts || echo 'WordPress not ready yet' &&
         echo 'APISIX is ready for dynamic route management!' &&
+        echo 'Dashboard available at: http://localhost:5173' &&
+        echo 'Gateway available at: http://localhost:9080' &&
         tail -f /usr/local/apisix/logs/error.log
       "
     networks:
@@ -104,11 +118,12 @@ services:
       ENVIRONMENT: production
       DEBUG: false
       ENABLE_CORS: true
-      ROUTE_CONFIG_PATH: /app/apisix.yaml
+      ROUTE_CONFIG_PATH: /shared/apisix.yaml
     ports:
       - "3000:3000"
     volumes:
-      - ./apisix/apisix.yaml:/app/apisix.yaml:rw  # Mount for route management
+      - apisix_config_volume:/shared  # ใช้ shared volume กับ APISIX
+      - route_backups:/app/backups    # Volume สำหรับ backups
     depends_on:
       mariadb:
         condition: service_healthy
@@ -120,6 +135,35 @@ services:
       timeout: 5s
       retries: 5
       start_period: 60s
+
+  # Service สำหรับ sync config ระหว่าง containers
+  config-sync:
+    image: alpine:latest
+    container_name: config-sync
+    restart: unless-stopped
+    volumes:
+      - apisix_config_volume:/apisix-config
+      - ./apisix/apisix.yaml:/host-config/apisix.yaml:rw
+    command: >
+      sh -c "
+        echo '=== Config Sync Service ===' &&
+        while true; do
+          if [ -f /apisix-config/apisix.yaml ]; then
+            echo 'Syncing config from container to host...' &&
+            cp /apisix-config/apisix.yaml /host-config/apisix.yaml 2>/dev/null || true
+          fi &&
+          if [ -f /host-config/apisix.yaml ]; then
+            echo 'Syncing config from host to container...' &&
+            cp /host-config/apisix.yaml /apisix-config/apisix.yaml 2>/dev/null || true &&
+            chmod 666 /apisix-config/apisix.yaml 2>/dev/null || true
+          fi &&
+          sleep 5
+        done
+      "
+    networks:
+      - gateway-net
+    depends_on:
+      - apisix_api
 
   apisix-dashboard:
     build:
@@ -148,3 +192,5 @@ networks:
 volumes:
   mariadb_data:
   wordpress_data:
+  route_backups:
+  apisix_config_volume:  # Shared volume สำหรับ config ระหว่าง APISIX และ GoFiber

@@ -316,15 +316,29 @@ func (rc *RouteController) GetRouteTemplates(c *fiber.Ctx) error {
 					"allow_origins": "*",
 					"allow_methods": "GET,POST,PUT,DELETE,OPTIONS",
 				},
-							"proxy-rewrite": map[string]interface{}{
-								"regex_uri": []string{"^/api/wp/(.*)", "/wp-json/wp/v2/$1"},
-							},
-						},
-					},
-				}
-				
-				return c.JSON(fiber.Map{
-					"templates": templates,
-					"status":    "success",
-				})
-			}
+				"proxy-rewrite": map[string]interface{}{
+					"regex_uri": []string{"^/api/wp/(.*)", "/wp-json/wp/v2/$1"},
+				},
+			},
+		},
+		"gofiber": map[string]interface{}{
+			"name":        "GoFiber API Route",
+			"uri":         "/api/custom/*",
+			"methods":     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+			"target":      "gofiber-backend",
+			"port":        3000,
+			"description": "Route for GoFiber backend API endpoints",
+			"plugins": map[string]interface{}{
+				"cors": map[string]interface{}{
+					"allow_origins": "*",
+					"allow_methods": "GET,POST,PUT,DELETE,OPTIONS",
+				},
+			},
+		},
+	}
+
+	return c.JSON(fiber.Map{
+		"templates": templates,
+		"status":    "success",
+	})
+}
