@@ -1,3 +1,4 @@
+// frontend/src/service/api.js (Updated with Route Management)
 import axios from "axios";
 
 // Configuration - Use window.location.hostname to detect if running in container
@@ -7,11 +8,17 @@ const getBaseURL = (port) => {
 };
 
 const APISIX_GATEWAY_URL = getBaseURL(9080);
-const APISIX_STATUS_URL = `${APISIX_GATEWAY_URL}/apisix/status`;
+const GOFIBER_DIRECT_URL = getBaseURL(3000);
 
 // Create axios instance for Gateway API
 const gatewayApi = axios.create({
   baseURL: APISIX_GATEWAY_URL,
+  timeout: 10000,
+});
+
+// Create axios instance for direct GoFiber API (for route management)
+const directApi = axios.create({
+  baseURL: GOFIBER_DIRECT_URL,
   timeout: 10000,
 });
 
@@ -24,7 +31,7 @@ const handleError = (error, context) => {
     throw new Error(`${message} (${error.response.status})`);
   } else if (error.request) {
     if (error.code === 'ERR_NETWORK' || error.message.includes('Network Error')) {
-      throw new Error('Cannot connect to APISIX services. Please check if Docker containers are running.');
+      throw new Error('Cannot connect to services. Please check if Docker containers are running.');
     }
     throw new Error('Network error - please check if services are running');
   } else {
@@ -32,113 +39,14 @@ const handleError = (error, context) => {
   }
 };
 
-// Mock static routes for standalone mode
-const mockRoutes = [
-  {
-    key: "1",
-    value: {
-      id: "1",
-      name: "WordPress Posts API",
-      uri: "/api/posts",
-      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-      upstream: {
-        type: "roundrobin",
-        nodes: {
-          "wordpress:80": 1
-        }
-      },
-      plugins: {
-        "proxy-rewrite": {
-          regex_uri: ["^/api/posts(.*)", "/wp-json/wp/v2/posts$1"]
-        },
-        "cors": {
-          allow_origins: "*",
-          allow_methods: "GET,POST,PUT,DELETE,OPTIONS"
-        }
-      },
-      create_time: Math.floor(Date.now() / 1000),
-      update_time: Math.floor(Date.now() / 1000)
-    }
-  },
-  {
-    key: "2",
-    value: {
-      id: "2",
-      name: "GoFiber Data API",
-      uri: "/api/data/*",
-      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-      upstream: {
-        type: "roundrobin",
-        nodes: {
-          "gofiber-backend:3000": 1
-        }
-      },
-      plugins: {
-        "cors": {
-          allow_origins: "*",
-          allow_methods: "GET,POST,PUT,DELETE,OPTIONS"
-        }
-      },
-      create_time: Math.floor(Date.now() / 1000),
-      update_time: Math.floor(Date.now() / 1000)
-    }
-  },
-  {
-    key: "3",
-    value: {
-      id: "3",
-      name: "GoFiber Health Check",
-      uri: "/api/health",
-      methods: ["GET", "OPTIONS"],
-      upstream: {
-        type: "roundrobin",
-        nodes: {
-          "gofiber-backend:3000": 1
-        }
-      },
-      plugins: {
-        "cors": {
-          allow_origins: "*",
-          allow_methods: "GET,OPTIONS"
-        }
-      },
-      create_time: Math.floor(Date.now() / 1000),
-      update_time: Math.floor(Date.now() / 1000)
-    }
-  }
-];
-
-const mockUpstreams = [
-  {
-    key: "1",
-    value: {
-      id: "1",
-      name: "WordPress Upstream",
-      type: "roundrobin",
-      nodes: {
-        "wordpress:80": 1
-      }
-    }
-  },
-  {
-    key: "2",
-    value: {
-      id: "2",
-      name: "GoFiber Upstream", 
-      type: "roundrobin",
-      nodes: {
-        "gofiber-backend:3000": 1
-      }
-    }
-  }
-];
-
 // API functions
 export const api = {
+  // ========== EXISTING FUNCTIONS ==========
+  
   // Health check for APISIX itself
   checkAPISIXHealth: async () => {
     try {
-      const response = await axios.get(APISIX_STATUS_URL, { 
+      const response = await axios.get(`${APISIX_GATEWAY_URL}/apisix/status`, { 
         timeout: 5000,
         headers: {
           'Accept': 'application/json',
@@ -151,84 +59,196 @@ export const api = {
     }
   },
 
-  // Routes management (mock for standalone mode)
+  // Routes management (NOW USES REAL API!)
   getRoutes: async () => {
     try {
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      console.log('Getting routes from static configuration...');
+      console.log('Getting routes from GoFiber route management API...');
+      const response = await directApi.get('/api/routes');
+      return {
+        list: response.data.list || [],
+        total: response.data.total || 0
+      };
+    // eslint-disable-next-line no-unused-vars
+    } catch (error) {
+      console.warn('Route management API failed, falling back to mock data');
+      // Fallback to mock data if API fails
       return {
         list: mockRoutes,
         total: mockRoutes.length
       };
-    } catch (error) {
-      handleError(error, 'getRoutes');
     }
   },
 
   createRoute: async (routeConfig) => {
-    // Validate input parameters
     if (!routeConfig || typeof routeConfig !== 'object') {
       throw new Error('Route configuration is required and must be an object');
     }
 
-    if (!routeConfig.id || !routeConfig.uri) {
-      throw new Error('Route ID and URI are required');
+    if (!routeConfig.uri) {
+      throw new Error('Route URI is required');
     }
 
-    // In standalone mode, we can't create routes dynamically
-    console.warn('Route creation attempted in standalone mode:', routeConfig);
-    throw new Error('Route creation is not supported in standalone mode. Routes are configured in apisix.yaml file.');
+    try {
+      console.log('Creating route via GoFiber API:', routeConfig);
+      const response = await directApi.post('/api/routes', routeConfig);
+      return response.data;
+    } catch (error) {
+      handleError(error, 'createRoute');
+    }
   },
 
   deleteRoute: async (routeId) => {
-    // Validate input parameter
     if (!routeId) {
       throw new Error('Route ID is required');
     }
 
-    // In standalone mode, we can't delete routes dynamically
-    console.warn('Route deletion attempted in standalone mode:', routeId);
-    throw new Error('Route deletion is not supported in standalone mode. Routes are configured in apisix.yaml file.');
+    try {
+      console.log('Deleting route via GoFiber API:', routeId);
+      const response = await directApi.delete(`/api/routes/${routeId}`);
+      return response.data;
+    } catch (error) {
+      handleError(error, 'deleteRoute');
+    }
   },
 
-  // Upstreams management (mock for standalone mode)
+  updateRoute: async (routeId, routeConfig) => {
+    if (!routeId) {
+      throw new Error('Route ID is required');
+    }
+    if (!routeConfig || typeof routeConfig !== 'object') {
+      throw new Error('Route configuration is required and must be an object');
+    }
+
+    try {
+      console.log('Updating route via GoFiber API:', routeId, routeConfig);
+      const response = await directApi.put(`/api/routes/${routeId}`, routeConfig);
+      return response.data;
+    } catch (error) {
+      handleError(error, 'updateRoute');
+    }
+  },
+
+  getRoute: async (routeId) => {
+    if (!routeId) {
+      throw new Error('Route ID is required');
+    }
+
+    try {
+      console.log('Getting route by ID via GoFiber API:', routeId);
+      const response = await directApi.get(`/api/routes/${routeId}`);
+      return response.data;
+    } catch (error) {
+      handleError(error, 'getRoute');
+    }
+  },
+
+  // ========== NEW ROUTE MANAGEMENT FUNCTIONS ==========
+
+  // Quick route creation with templates
+  createQuickRoute: async (templateData) => {
+    if (!templateData || typeof templateData !== 'object') {
+      throw new Error('Template data is required and must be an object');
+    }
+
+    try {
+      console.log('Creating quick route:', templateData);
+      const response = await directApi.post('/api/routes/quick', templateData);
+      return response.data;
+    } catch (error) {
+      handleError(error, 'createQuickRoute');
+    }
+  },
+
+  // Get route templates
+  getRouteTemplates: async () => {
+    try {
+      console.log('Getting route templates...');
+      const response = await directApi.get('/api/routes/templates');
+      return response.data;
+    // eslint-disable-next-line no-unused-vars
+    } catch (error) {
+      console.warn('Template API failed, using fallback templates');
+      return {
+        templates: {
+          wordpress: {
+            name: "WordPress API Route",
+            uri: "/api/wp/*",
+            methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            target: "wordpress",
+            port: 80,
+            type: "wordpress"
+          },
+          gofiber: {
+            name: "GoFiber API Route", 
+            uri: "/api/custom/*",
+            methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            target: "gofiber-backend",
+            port: 3000,
+            type: "gofiber"
+          }
+        }
+      };
+    }
+  },
+
+  // Reload APISIX configuration
+  reloadAPISIX: async () => {
+    try {
+      console.log('Reloading APISIX configuration...');
+      const response = await directApi.post('/api/routes/reload');
+      return response.data;
+    } catch (error) {
+      handleError(error, 'reloadAPISIX');
+    }
+  },
+
+  // Upstreams management (uses real API)
   getUpstreams: async () => {
     try {
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      console.log('Getting upstreams from static configuration...');
+      console.log('Getting upstreams from GoFiber API...');
+      const response = await directApi.get('/api/upstreams');
+      return {
+        list: response.data.list || [],
+        total: response.data.total || 0
+      };
+    // eslint-disable-next-line no-unused-vars
+    } catch (error) {
+      console.warn('Upstreams API failed, falling back to mock data');
       return {
         list: mockUpstreams,
         total: mockUpstreams.length
       };
+    }
+  },
+
+  // ========== ENHANCED SETUP FUNCTION ==========
+  
+  setupInitialRoutes: async () => {
+    try {
+      // Check if routes already exist
+      const existingRoutes = await api.getRoutes();
+      if (existingRoutes.list && existingRoutes.list.length > 0) {
+        console.log('Routes already configured');
+        return { 
+          success: true, 
+          message: `Found ${existingRoutes.list.length} existing routes. System is ready!`,
+          routes: existingRoutes.list.length
+        };
+      }
+
+      // If no routes exist, suggest creating some
+      return {
+        success: true,
+        message: 'No routes found. Use the dashboard to create routes or check APISIX configuration.',
+        routes: 0
+      };
     } catch (error) {
-      handleError(error, 'getUpstreams');
+      throw new Error(`Route setup check failed: ${error.message}`);
     }
   },
 
-  createUpstream: async (upstreamConfig) => {
-    // Validate input parameters
-    if (!upstreamConfig || typeof upstreamConfig !== 'object') {
-      throw new Error('Upstream configuration is required and must be an object');
-    }
-
-    console.warn('Upstream creation attempted in standalone mode:', upstreamConfig);
-    throw new Error('Upstream creation is not supported in standalone mode.');
-  },
-
-  deleteUpstream: async (upstreamId) => {
-    // Validate input parameter
-    if (!upstreamId) {
-      throw new Error('Upstream ID is required');
-    }
-
-    console.warn('Upstream deletion attempted in standalone mode:', upstreamId);
-    throw new Error('Upstream deletion is not supported in standalone mode.');
-  },
-
-  // WordPress API testing with better error handling
+  // ========== REST OF EXISTING FUNCTIONS ==========
+  
   testWordPressAPI: async () => {
     console.log('Testing WordPress API...');
     
@@ -239,11 +259,10 @@ export const api = {
         timeout: 5000,
         maxRedirects: 0,
         validateStatus: function (status) {
-          return status >= 200 && status < 400; // Accept 2xx and 3xx
+          return status >= 200 && status < 400;
         }
       });
       
-      // If WordPress redirects to install, it's not set up
       if (wpResponse.status === 302 || wpResponse.request.responseURL?.includes('wp-admin/install.php')) {
         throw new Error('WordPress setup required. Please visit http://localhost:8080 to complete installation');
       }
@@ -278,7 +297,6 @@ export const api = {
         } catch (directError) {
           console.warn('Direct WordPress API failed:', directError.message);
           
-          // Check if it's a 404 (no posts) vs actual error
           if (directError.response?.status === 404) {
             throw new Error('WordPress REST API endpoint not found. This usually means: 1) WordPress is not fully installed, 2) Permalinks need to be reset, or 3) No posts exist yet');
           }
@@ -288,10 +306,9 @@ export const api = {
       }
     } catch (error) {
       if (error.message.includes('setup required') || error.message.includes('install')) {
-        throw error; // Re-throw setup errors as-is
+        throw error;
       }
       
-      // For network errors
       if (error.code === 'ECONNREFUSED' || error.message.includes('Network Error')) {
         throw new Error('Cannot connect to WordPress. Please check if WordPress container is running');
       }
@@ -302,8 +319,8 @@ export const api = {
 
   testGoFiberAPI: async () => {
     const testEndpoints = [
-      `${APISIX_GATEWAY_URL}/api/data`,  // Through APISIX
-      `http://${window.location.hostname}:3000/api/data`,  // Direct access
+      `${APISIX_GATEWAY_URL}/api/data`,
+      `http://${window.location.hostname}:3000/api/data`,
     ];
 
     for (const endpoint of testEndpoints) {
@@ -328,8 +345,8 @@ export const api = {
 
   testGoFiberHealth: async () => {
     const testEndpoints = [
-      `${APISIX_GATEWAY_URL}/api/health`,  // Through APISIX
-      `http://${window.location.hostname}:3000/api/health`,  // Direct access
+      `${APISIX_GATEWAY_URL}/api/health`,
+      `http://${window.location.hostname}:3000/api/health`,
     ];
 
     for (const endpoint of testEndpoints) {
@@ -352,24 +369,9 @@ export const api = {
     }
   },
 
-  // Setup initial routes (mock for standalone mode)
-  setupInitialRoutes: async () => {
-    return new Promise((resolve) => {
-      // Simulate setup delay
-      setTimeout(() => {
-        console.log('Routes are already configured in standalone mode');
-        resolve({ 
-          success: true, 
-          message: 'Routes are already configured in standalone mode via apisix.yaml' 
-        });
-      }, 1000);
-    });
-  },
-
   // Data operations through APISIX gateway
   createData: async (data) => {
     try {
-      // Validate input data
       if (!data || typeof data !== 'object') {
         throw new Error('Data is required and must be an object');
       }
@@ -383,7 +385,6 @@ export const api = {
 
   updateData: async (id, data) => {
     try {
-      // Validate input parameters
       if (!id) {
         throw new Error('ID is required');
       }
@@ -400,7 +401,6 @@ export const api = {
 
   deleteData: async (id) => {
     try {
-      // Validate input parameter
       if (!id) {
         throw new Error('ID is required');
       }
@@ -412,7 +412,6 @@ export const api = {
     }
   },
 
-  // Get data from GoFiber API
   getData: async () => {
     try {
       const response = await gatewayApi.get("/api/data");
@@ -422,10 +421,8 @@ export const api = {
     }
   },
 
-  // Get single data item
   getDataById: async (id) => {
     try {
-      // Validate input parameter
       if (!id) {
         throw new Error('ID is required');
       }
@@ -437,12 +434,12 @@ export const api = {
     }
   },
 
-  // Comprehensive ping function
   ping: async () => {
     const results = {
       apisix: false,
       gofiber: false,
       wordpress: false,
+      routeManagement: false,
       timestamp: new Date().toISOString(),
       details: {}
     };
@@ -477,34 +474,92 @@ export const api = {
       results.details.wordpress = { error: error.message };
     }
 
+    // Test Route Management
+    try {
+      await directApi.get('/api/routes');
+      results.routeManagement = true;
+      results.details.routeManagement = { status: 'healthy' };
+    } catch (error) {
+      console.log('Route Management ping failed:', error.message);
+      results.details.routeManagement = { error: error.message };
+    }
+
     return results;
   },
 };
 
-// Request/response logging
-gatewayApi.interceptors.request.use(
-  (config) => {
-    console.log(`🌐 Gateway Request: ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`);
-    return config;
-  },
-  (error) => {
-    console.error('🌐 Gateway Request Error:', error);
-    return Promise.reject(error);
+// Mock data (fallback)
+const mockRoutes = [
+  {
+    key: "1",
+    value: {
+      id: "1",
+      name: "WordPress Posts API",
+      uri: "/api/posts",
+      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+      upstream: {
+        type: "roundrobin",
+        nodes: {
+          "wordpress:80": 1
+        }
+      },
+      plugins: {
+        "proxy-rewrite": {
+          regex_uri: ["^/api/posts(.*)", "/wp-json/wp/v2/posts$1"]
+        },
+        "cors": {
+          allow_origins: "*",
+          allow_methods: "GET,POST,PUT,DELETE,OPTIONS"
+        }
+      },
+      create_time: Math.floor(Date.now() / 1000),
+      update_time: Math.floor(Date.now() / 1000)
+    }
   }
-);
+];
 
-gatewayApi.interceptors.response.use(
-  (response) => {
-    console.log(`✅ Gateway Response: ${response.status} - ${response.config.method?.toUpperCase()} ${response.config.url}`);
-    return response;
-  },
-  (error) => {
-    const status = error.response?.status || 'Network Error';
-    const method = error.config?.method?.toUpperCase() || 'UNKNOWN';
-    const url = error.config?.url || 'unknown';
-    console.error(`❌ Gateway Error: ${status} - ${method} ${url}`, error.message);
-    return Promise.reject(error);
+const mockUpstreams = [
+  {
+    key: "1",
+    value: {
+      id: "1",
+      name: "WordPress Upstream",
+      type: "roundrobin",
+      nodes: {
+        "wordpress:80": 1
+      }
+    }
   }
-);
+];
+
+// Request/response logging
+[gatewayApi, directApi].forEach((apiInstance, index) => {
+  const instanceName = index === 0 ? 'Gateway' : 'Direct';
+  
+  apiInstance.interceptors.request.use(
+    (config) => {
+      console.log(`🌐 ${instanceName} Request: ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`);
+      return config;
+    },
+    (error) => {
+      console.error(`🌐 ${instanceName} Request Error:`, error);
+      return Promise.reject(error);
+    }
+  );
+
+  apiInstance.interceptors.response.use(
+    (response) => {
+      console.log(`✅ ${instanceName} Response: ${response.status} - ${response.config.method?.toUpperCase()} ${response.config.url}`);
+      return response;
+    },
+    (error) => {
+      const status = error.response?.status || 'Network Error';
+      const method = error.config?.method?.toUpperCase() || 'UNKNOWN';
+      const url = error.config?.url || 'unknown';
+      console.error(`❌ ${instanceName} Error: ${status} - ${method} ${url}`, error.message);
+      return Promise.reject(error);
+    }
+  );
+});
 
 export default api;

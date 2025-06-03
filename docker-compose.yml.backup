@@ -1,45 +1,52 @@
-services:
-  # etcd for APISIX configuration storage
-  etcd:
-    image: bitnami/etcd:3.5.0
-    container_name: etcd
-    environment:
-      - ALLOW_NONE_AUTHENTICATION=yes
-      - ETCD_ADVERTISE_CLIENT_URLS=http://0.0.0.0:2379
-      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
-    ports:
-      - "2379:2379"
-    networks:
-      - apisix-network
+version: '3.9'
 
-  # APISIX API Gateway with environment variables
-  apisix:
+services:
+  apisix_api:
     image: apache/apisix:3.9.1-debian
-    container_name: apisix
-    restart: always
-    depends_on:
-      - etcd
+    container_name: apisix_api
     ports:
       - "9080:9080"
       - "9180:9180"
-    networks:
-      - apisix-network
+    volumes:
+      - ./apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
+      - ./apisix/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
     environment:
-      # ใช้ environment variables แทน config file
-      - APISIX_STAND_ALONE=false
-      - APISIX_ETCD_HOST=http://etcd:2379
-      - APISIX_ETCD_PREFIX=/apisix
-      - APISIX_ETCD_TIMEOUT=30
-      - APISIX_ADMIN_KEY_REQUIRED=false
-    # ลบ volume mount ออกไปก่อน
-    # volumes:
-    #   - ./apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
+      - APISIX_STAND_ALONE=true
+    restart: unless-stopped
+    command: >
+      sh -c "
+        echo '=== APISIX Standalone Setup ===' &&
+        echo 'Waiting for backends (30s)...' &&
+        sleep 30 &&
+        echo 'Checking config files...' &&
+        ls -la /usr/local/apisix/conf/ &&
+        echo 'Config content:' &&
+        cat /usr/local/apisix/conf/config.yaml &&
+        echo 'Routes content:' &&
+        cat /usr/local/apisix/conf/apisix.yaml &&
+        echo 'Starting APISIX...' &&
+        /usr/bin/apisix init &&
+        /usr/bin/apisix start &&
+        echo 'APISIX started successfully!' &&
+        echo 'Testing internal connectivity...' &&
+        sleep 5 &&
+        curl -s http://gofiber-backend:3000/api/health || echo 'GoFiber not ready yet' &&
+        curl -s http://wordpress/wp-json/wp/v2/posts || echo 'WordPress not ready yet' &&
+        echo 'Monitoring logs...' &&
+        tail -f /usr/local/apisix/logs/error.log
+      "
+    networks:
+      - gateway-net
+    depends_on:
+      wordpress:
+        condition: service_healthy
+      gofiber-backend:
+        condition: service_healthy
 
-  # MariaDB Database
   mariadb:
     image: mariadb:10.6
     container_name: mariadb
-    restart: always
+    restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: rootpassword
       MYSQL_DATABASE: apisix_db
@@ -49,64 +56,91 @@ services:
       - "3306:3306"
     volumes:
       - mariadb_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
-      - apisix-network
+      - gateway-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
-  # WordPress API Provider
   wordpress:
     image: wordpress:latest
     container_name: wordpress
-    restart: always
+    restart: unless-stopped
     environment:
       WORDPRESS_DB_HOST: mariadb
       WORDPRESS_DB_USER: apisix_user
       WORDPRESS_DB_PASSWORD: apisix_pass
       WORDPRESS_DB_NAME: apisix_db
+      WORDPRESS_TABLE_PREFIX: wp_
     ports:
       - "8080:80"
     depends_on:
-      - mariadb
+      mariadb:
+        condition: service_healthy
     volumes:
       - wordpress_data:/var/www/html
     networks:
-      - apisix-network
+      - gateway-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
 
-  # GoFiber Backend
   gofiber-backend:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: gofiber-backend
-    restart: always
+    restart: unless-stopped
     environment:
       DB_HOST: mariadb
       DB_PORT: 3306
       DB_USER: apisix_user
       DB_PASSWORD: apisix_pass
       DB_NAME: apisix_db
+      PORT: 3000
+      ENVIRONMENT: production
+      DEBUG: false
+      ENABLE_CORS: true
     ports:
       - "3000:3000"
     depends_on:
-      - mariadb
+      mariadb:
+        condition: service_healthy
     networks:
-      - apisix-network
+      - gateway-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
-  # React Dashboard
-  apisix-react-dashboard:
+  apisix-dashboard:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: apisix-react-dashboard
-    restart: always
+    container_name: apisix-dashboard
+    restart: unless-stopped
     ports:
-      - "3001:3000"
+      - "5173:5173"
     environment:
-      - VITE_APISIX_ADMIN_URL=http://localhost:9180
+      - NODE_ENV=production
+      - VITE_API_BASE_URL=http://localhost:9080
     depends_on:
-      - apisix
+      apisix_api:
+        condition: service_started
     networks:
-      - apisix-network
+      - gateway-net
 
 networks:
-  apisix-network:
+  gateway-net:
     driver: bridge
 
 volumes:

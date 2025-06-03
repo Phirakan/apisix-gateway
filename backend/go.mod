@@ -6,6 +6,7 @@ require (
 	github.com/gofiber/fiber/v2 v2.52.8
 	gorm.io/driver/mysql v1.5.2
 	gorm.io/gorm v1.25.5
+	gopkg.in/yaml.v2 v2.4.0
 )
 
 require (

@@ -1,0 +1,72 @@
+apisix:
+  node_listen: 9080
+  enable_admin: true
+  admin_listen:
+    ip: "0.0.0.0"
+    port: 9180
+  admin_api_cors: true
+  extra_lua_path: ""
+  extra_lua_cpath: ""
+
+deployment:
+  role: traditional
+  role_traditional:
+    config_provider: etcd
+
+etcd:
+  host:
+    - "http://etcd:2379"    
+
+  timeout: 30
+  startup_retry: 5         
+  resync_delay: 5          
+  health_check_timeout: 10  
+
+admin:
+  admin_key:
+    - name: "admin"
+      key: "edd1c9f034335f136f87ad84b625c8f1"
+      role: admin
+  cors:
+    allow_origins: "*"
+    allow_methods: "GET,POST,PUT,DELETE,OPTIONS,PATCH"
+    allow_headers: "Origin,Content-Type,Accept,Authorization,X-API-Key"
+    allow_credentials: false
+    max_age: 86400
+
+plugins:
+  - public-api
+  - cors
+  - proxy-rewrite
+  - key-auth
+  - limit-req
+  - limit-count
+  - real-ip
+  - server-info
+  - prometheus
+  - node-status
+
+plugin_attr:
+  prometheus:
+    export_addr:
+      ip: "0.0.0.0"
+      port: 9091
+
+nginx_config:
+  error_log: "/usr/local/apisix/logs/error.log"
+  error_log_level: "info"
+  worker_processes: "auto"
+  worker_rlimit_nofile: 20480
+  event:
+    worker_connections: 10620
+  http:
+    access_log: "/usr/local/apisix/logs/access.log"
+    keepalive_timeout: 60s
+    client_header_timeout: 60s
+    client_body_timeout: 60s
+    send_timeout: 10s
+    underscores_in_headers: "on"
+    real_ip_header: "X-Real-IP"
+    real_ip_from:
+      - 127.0.0.1
+      - 'unix:'

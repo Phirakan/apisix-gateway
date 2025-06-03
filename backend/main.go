@@ -1,3 +1,4 @@
+// backend/main.go (Updated)
 package main
 
 import (
@@ -20,7 +21,7 @@ func main() {
 	// Load configuration
 	cfg := config.Load()
 	
-	log.Println("🚀 Starting APISIX GoFiber Backend Server...")
+	log.Println("🚀 Starting APISIX GoFiber Backend Server with Route Management...")
 	log.Printf("📋 Environment: %s", cfg.Server.Environment)
 	
 	// Validate configuration
@@ -82,11 +83,27 @@ func main() {
 		}
 	}
 
+	// Validate route management configuration
+	log.Println("🔧 Checking route management configuration...")
+	routeConfigPath := os.Getenv("ROUTE_CONFIG_PATH")
+	if routeConfigPath == "" {
+		routeConfigPath = "/app/apisix.yaml" // Default path
+	}
+	
+	// Check if apisix.yaml file exists and is accessible
+	if _, err := os.Stat(routeConfigPath); err != nil {
+		log.Printf("⚠️  Warning: Route config file not found at %s: %v", routeConfigPath, err)
+		log.Println("📝 Route management will use fallback configuration")
+	} else {
+		log.Printf("✅ Route config file found at %s", routeConfigPath)
+		log.Println("🎯 Dynamic route management enabled")
+	}
+
 	// Create Fiber app with optimized configuration
 	app := fiber.New(fiber.Config{
 		Prefork:               cfg.Server.Prefork,
-		ServerHeader:          "GoFiber APISIX Backend",
-		AppName:               "APISIX Backend v1.0.0",
+		ServerHeader:          "GoFiber APISIX Backend with Route Management",
+		AppName:               "APISIX Backend with Route Management v2.0.0",
 		BodyLimit:             int(cfg.Security.MaxRequestSize),
 		ReadTimeout:           time.Duration(cfg.Server.ReadTimeout) * time.Second,
 		WriteTimeout:          time.Duration(cfg.Server.WriteTimeout) * time.Second,
@@ -121,16 +138,26 @@ func main() {
 	app.Use(middleware.JSONOnly())
 	app.Use(middleware.ValidateContentLength(cfg.Security.MaxRequestSize))
 	
-	// Setup API key authentication if enabled
+	// Setup API key authentication if enabled (but exclude route management endpoints)
 	if cfg.Security.EnableAPIKeyAuth && len(cfg.Security.APIKeys) > 0 {
 		app.Use("/api/data", middleware.APIKeyAuth(cfg.Security.APIKeys))
 		log.Printf("🔒 API Key authentication enabled for /api/data endpoints")
+		log.Printf("📝 Route management endpoints are accessible without API key for development")
 	}
 
-	// Setup routes
+	// Setup routes (including route management)
 	log.Println("🛣️  Setting up routes...")
 	routes.SetupRoutes(app, db)
 	log.Println("✅ Routes configured successfully")
+	log.Println("🎯 Route management endpoints available:")
+	log.Println("   - GET    /api/routes (list all routes)")
+	log.Println("   - POST   /api/routes (create route)")
+	log.Println("   - GET    /api/routes/:id (get route by ID)")
+	log.Println("   - PUT    /api/routes/:id (update route)")
+	log.Println("   - DELETE /api/routes/:id (delete route)")
+	log.Println("   - POST   /api/routes/quick (quick route creation)")
+	log.Println("   - GET    /api/routes/templates (get templates)")
+	log.Println("   - POST   /api/routes/reload (reload APISIX)")
 
 	// Graceful shutdown
 	c := make(chan os.Signal, 1)
@@ -159,10 +186,15 @@ func main() {
 	address := cfg.GetServerAddress()
 	log.Printf("🌐 Server starting on http://%s", address)
 	log.Printf("📋 Available endpoints:")
-	log.Printf("   Health Check: http://%s/api/health", address)
-	log.Printf("   API Docs:     http://%s/", address)
-	log.Printf("   Data API:     http://%s/api/data", address)
-	log.Println("🎉 GoFiber backend ready!")
+	log.Printf("   Health Check:       http://%s/api/health", address)
+	log.Printf("   API Docs:           http://%s/", address)
+	log.Printf("   Data API:           http://%s/api/data", address)
+	log.Printf("   Route Management:   http://%s/api/routes", address)
+	log.Printf("   Upstreams:          http://%s/api/upstreams", address)
+	log.Printf("   Dashboard:          http://localhost:5173")
+	log.Println("")
+	log.Println("🎉 GoFiber backend with Route Management ready!")
+	log.Println("💡 Use the React Dashboard to manage APISIX routes dynamically")
 	
 	if cfg.Security.EnableHTTPS {
 		log.Printf("🔒 HTTPS enabled")
