@@ -1,9 +1,10 @@
-// backend/services/route_service.go
+// backend/service/route_service.go (แก้ไข package name)
 package services
 
 import (
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"time"
 
@@ -59,8 +60,11 @@ type RouteService struct {
 // NewRouteService creates a new RouteService instance
 func NewRouteService(configPath string) *RouteService {
 	if configPath == "" {
-		configPath = "/usr/local/apisix/conf/apisix.yaml" // Default APISIX config path
+		configPath = "/app/apisix.yaml" // Updated default path
 	}
+	
+	log.Printf("📁 Route service initialized with config path: %s", configPath)
+	
 	return &RouteService{
 		configPath: configPath,
 	}
@@ -68,24 +72,36 @@ func NewRouteService(configPath string) *RouteService {
 
 // GetRoutes reads and returns all routes from APISIX config
 func (rs *RouteService) GetRoutes() ([]RouteConfig, error) {
+	log.Println("📖 Reading routes from configuration...")
+	
 	config, err := rs.readConfig()
 	if err != nil {
+		log.Printf("❌ Failed to read routes config: %v", err)
 		return nil, fmt.Errorf("failed to read config: %w", err)
 	}
+	
+	log.Printf("✅ Successfully loaded %d routes", len(config.Routes))
 	return config.Routes, nil
 }
 
 // GetUpstreams reads and returns all upstreams from APISIX config
 func (rs *RouteService) GetUpstreams() ([]UpstreamDefinition, error) {
+	log.Println("📖 Reading upstreams from configuration...")
+	
 	config, err := rs.readConfig()
 	if err != nil {
+		log.Printf("❌ Failed to read upstreams config: %v", err)
 		return nil, fmt.Errorf("failed to read config: %w", err)
 	}
+	
+	log.Printf("✅ Successfully loaded %d upstreams", len(config.Upstreams))
 	return config.Upstreams, nil
 }
 
 // AddRoute adds a new route to the configuration
 func (rs *RouteService) AddRoute(route RouteConfig) error {
+	log.Printf("➕ Adding new route: %s", route.Name)
+	
 	config, err := rs.readConfig()
 	if err != nil {
 		return fmt.Errorf("failed to read config: %w", err)
@@ -94,6 +110,7 @@ func (rs *RouteService) AddRoute(route RouteConfig) error {
 	// Auto-generate ID if not provided
 	if route.ID == 0 {
 		route.ID = rs.getNextRouteID(config.Routes)
+		log.Printf("🔢 Auto-generated route ID: %d", route.ID)
 	}
 
 	// Check for duplicate ID
@@ -106,19 +123,40 @@ func (rs *RouteService) AddRoute(route RouteConfig) error {
 	// Set default values if not provided
 	if route.Methods == nil || len(route.Methods) == 0 {
 		route.Methods = []string{"GET"}
+		log.Println("🔧 Set default HTTP methods: [GET]")
 	}
 	if route.Upstream.Type == "" {
 		route.Upstream.Type = "roundrobin"
+		log.Println("🔧 Set default upstream type: roundrobin")
+	}
+
+	// Add default timeout if not provided
+	if route.Upstream.Timeout == nil {
+		route.Upstream.Timeout = &TimeoutConfig{
+			Connect: 6,
+			Send:    6,
+			Read:    6,
+		}
+		log.Println("🔧 Set default timeouts: 6s each")
 	}
 
 	// Add the new route
 	config.Routes = append(config.Routes, route)
-
-	return rs.writeConfig(config)
+	
+	err = rs.writeConfig(config)
+	if err != nil {
+		log.Printf("❌ Failed to write config after adding route: %v", err)
+		return err
+	}
+	
+	log.Printf("✅ Successfully added route: %s (ID: %d)", route.Name, route.ID)
+	return nil
 }
 
 // UpdateRoute updates an existing route
 func (rs *RouteService) UpdateRoute(id int, updatedRoute RouteConfig) error {
+	log.Printf("🔄 Updating route ID: %d", id)
+	
 	config, err := rs.readConfig()
 	if err != nil {
 		return fmt.Errorf("failed to read config: %w", err)
@@ -131,6 +169,7 @@ func (rs *RouteService) UpdateRoute(id int, updatedRoute RouteConfig) error {
 			updatedRoute.ID = id // Ensure ID doesn't change
 			config.Routes[i] = updatedRoute
 			found = true
+			log.Printf("🔄 Found and updated route: %s", updatedRoute.Name)
 			break
 		}
 	}
@@ -139,11 +178,20 @@ func (rs *RouteService) UpdateRoute(id int, updatedRoute RouteConfig) error {
 		return fmt.Errorf("route with ID %d not found", id)
 	}
 
-	return rs.writeConfig(config)
+	err = rs.writeConfig(config)
+	if err != nil {
+		log.Printf("❌ Failed to write config after updating route: %v", err)
+		return err
+	}
+	
+	log.Printf("✅ Successfully updated route ID: %d", id)
+	return nil
 }
 
 // DeleteRoute removes a route from the configuration
 func (rs *RouteService) DeleteRoute(id int) error {
+	log.Printf("🗑️ Deleting route ID: %d", id)
+	
 	config, err := rs.readConfig()
 	if err != nil {
 		return fmt.Errorf("failed to read config: %w", err)
@@ -152,11 +200,14 @@ func (rs *RouteService) DeleteRoute(id int) error {
 	// Find and remove the route
 	newRoutes := make([]RouteConfig, 0, len(config.Routes))
 	found := false
+	var deletedRouteName string
+	
 	for _, route := range config.Routes {
 		if route.ID != id {
 			newRoutes = append(newRoutes, route)
 		} else {
 			found = true
+			deletedRouteName = route.Name
 		}
 	}
 
@@ -165,11 +216,21 @@ func (rs *RouteService) DeleteRoute(id int) error {
 	}
 
 	config.Routes = newRoutes
-	return rs.writeConfig(config)
+	
+	err = rs.writeConfig(config)
+	if err != nil {
+		log.Printf("❌ Failed to write config after deleting route: %v", err)
+		return err
+	}
+	
+	log.Printf("✅ Successfully deleted route: %s (ID: %d)", deletedRouteName, id)
+	return nil
 }
 
 // GetRoute returns a specific route by ID
 func (rs *RouteService) GetRoute(id int) (*RouteConfig, error) {
+	log.Printf("🔍 Looking for route ID: %d", id)
+	
 	config, err := rs.readConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config: %w", err)
@@ -177,10 +238,12 @@ func (rs *RouteService) GetRoute(id int) (*RouteConfig, error) {
 
 	for _, route := range config.Routes {
 		if route.ID == id {
+			log.Printf("✅ Found route: %s (ID: %d)", route.Name, id)
 			return &route, nil
 		}
 	}
 
+	log.Printf("❌ Route with ID %d not found", id)
 	return nil, fmt.Errorf("route with ID %d not found", id)
 }
 
@@ -189,28 +252,36 @@ func (rs *RouteService) readConfig() (*APISIXConfig, error) {
 	// Create backup before reading
 	rs.createBackup()
 
+	log.Printf("📖 Reading config from: %s", rs.configPath)
+	
 	data, err := ioutil.ReadFile(rs.configPath)
 	if err != nil {
+		log.Printf("❌ Failed to read config file: %v", err)
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
 	var config APISIXConfig
 	err = yaml.Unmarshal(data, &config)
 	if err != nil {
+		log.Printf("❌ Failed to parse YAML: %v", err)
 		return nil, fmt.Errorf("failed to parse YAML: %w", err)
 	}
 
+	log.Printf("✅ Successfully parsed config: %d routes, %d upstreams", 
+		len(config.Routes), len(config.Upstreams))
 	return &config, nil
 }
 
 // writeConfig writes the configuration back to the file
 func (rs *RouteService) writeConfig(config *APISIXConfig) error {
+	log.Printf("💾 Writing config to: %s", rs.configPath)
+	
 	data, err := yaml.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal YAML: %w", err)
 	}
 
-	// Write to temporary file first
+	// Write to temporary file first for atomic operation
 	tempFile := rs.configPath + ".tmp"
 	err = ioutil.WriteFile(tempFile, data, 0644)
 	if err != nil {
@@ -220,17 +291,19 @@ func (rs *RouteService) writeConfig(config *APISIXConfig) error {
 	// Atomic move
 	err = os.Rename(tempFile, rs.configPath)
 	if err != nil {
-		// Clean up temp file
+		// Clean up temp file on error
 		os.Remove(tempFile)
 		return fmt.Errorf("failed to replace config file: %w", err)
 	}
 
+	log.Printf("✅ Successfully wrote config to: %s", rs.configPath)
 	return nil
 }
 
 // createBackup creates a backup of the current configuration
 func (rs *RouteService) createBackup() error {
 	if _, err := os.Stat(rs.configPath); os.IsNotExist(err) {
+		log.Println("ℹ️  No existing config file to backup")
 		return nil // No file to backup
 	}
 
@@ -238,14 +311,17 @@ func (rs *RouteService) createBackup() error {
 	
 	input, err := ioutil.ReadFile(rs.configPath)
 	if err != nil {
+		log.Printf("⚠️  Failed to read original file for backup: %v", err)
 		return fmt.Errorf("failed to read original file: %w", err)
 	}
 
 	err = ioutil.WriteFile(backupPath, input, 0644)
 	if err != nil {
+		log.Printf("⚠️  Failed to create backup: %v", err)
 		return fmt.Errorf("failed to create backup: %w", err)
 	}
 
+	log.Printf("💾 Created config backup: %s", backupPath)
 	return nil
 }
 
@@ -257,17 +333,22 @@ func (rs *RouteService) getNextRouteID(routes []RouteConfig) int {
 			maxID = route.ID
 		}
 	}
-	return maxID + 1
+	nextID := maxID + 1
+	log.Printf("🔢 Next available route ID: %d", nextID)
+	return nextID
 }
 
 // CreateQuickRoute creates common route configurations quickly
 func (rs *RouteService) CreateQuickRoute(routeType, name, uri, target string, port int) error {
+	log.Printf("🚀 Creating quick route: %s (%s)", name, routeType)
+	
 	var route RouteConfig
 
 	switch routeType {
 	case "wordpress":
 		route = RouteConfig{
 			Name:        name,
+			Description: fmt.Sprintf("WordPress API route for %s", target),
 			URI:         uri,
 			Methods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 			Upstream: UpstreamConfig{
@@ -280,18 +361,24 @@ func (rs *RouteService) CreateQuickRoute(routeType, name, uri, target string, po
 					"allow_origins": "*",
 					"allow_methods": "GET,POST,PUT,DELETE,OPTIONS",
 					"allow_headers": "Origin,Content-Type,Accept,Authorization,X-Requested-With",
+					"allow_credentials": false,
+					"max_age": 86400,
+					"expose_headers": "Content-Length,X-Total-Count",
 				},
 				"proxy-rewrite": map[string]interface{}{
 					"regex_uri": []string{
 						fmt.Sprintf("^%s(.*)", uri),
-						"/wp-json/wp/v2$1",
+						"/wp-json/wp/v2/posts$1",
 					},
 				},
 			},
 		}
+		log.Println("🔧 Created WordPress route template with CORS and proxy-rewrite")
+		
 	case "gofiber":
 		route = RouteConfig{
 			Name:        name,
+			Description: fmt.Sprintf("GoFiber API route for %s", target),
 			URI:         uri,
 			Methods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 			Upstream: UpstreamConfig{
@@ -304,15 +391,21 @@ func (rs *RouteService) CreateQuickRoute(routeType, name, uri, target string, po
 					"allow_origins": "*",
 					"allow_methods": "GET,POST,PUT,DELETE,OPTIONS",
 					"allow_headers": "Origin,Content-Type,Accept,Authorization,X-Requested-With,X-API-Key",
+					"allow_credentials": false,
+					"max_age": 86400,
+					"expose_headers": "Content-Length,X-Total-Count",
 				},
 			},
 		}
+		log.Println("🔧 Created GoFiber route template with CORS")
+		
 	default:
 		// Generic route
 		route = RouteConfig{
 			Name:        name,
+			Description: fmt.Sprintf("Generic HTTP route for %s", target),
 			URI:         uri,
-			Methods:     []string{"GET"},
+			Methods:     []string{"GET", "OPTIONS"},
 			Upstream: UpstreamConfig{
 				Type:  "roundrobin",
 				Nodes: map[string]int{fmt.Sprintf("%s:%d", target, port): 1},
@@ -322,23 +415,113 @@ func (rs *RouteService) CreateQuickRoute(routeType, name, uri, target string, po
 				"cors": map[string]interface{}{
 					"allow_origins": "*",
 					"allow_methods": "GET,OPTIONS",
+					"allow_headers": "Origin,Content-Type,Accept",
+					"allow_credentials": false,
+					"max_age": 86400,
 				},
 			},
 		}
+		log.Println("🔧 Created generic route template with basic CORS")
 	}
 
 	return rs.AddRoute(route)
 }
 
-// ReloadAPISIX attempts to reload APISIX configuration (docker restart simulation)
+// ReloadAPISIX attempts to reload APISIX configuration
 func (rs *RouteService) ReloadAPISIX() error {
-	// In a real scenario, you might trigger a Docker container restart here
-	// For now, we'll just return success as the file has been updated
+	log.Println("🔄 APISIX reload requested")
 	
-	// You could implement:
-	// - Docker API call to restart APISIX container
-	// - Signal to APISIX process to reload config
-	// - HTTP call to management endpoint
+	// In a real scenario, you might:
+	// 1. Send signal to APISIX process
+	// 2. Call Docker API to restart container
+	// 3. Use APISIX Admin API if available
+	// 4. Execute shell command to reload
+	
+	log.Println("ℹ️  Configuration file updated successfully")
+	log.Println("⚠️  Manual APISIX container restart required for changes to take effect")
+	log.Println("💡 Run: docker-compose restart apisix_api")
 	
 	return nil
+}
+
+// ValidateConfig validates the current configuration
+func (rs *RouteService) ValidateConfig() error {
+	log.Println("🔍 Validating APISIX configuration...")
+	
+	config, err := rs.readConfig()
+	if err != nil {
+		return fmt.Errorf("failed to read config for validation: %w", err)
+	}
+
+	// Check for duplicate route IDs
+	idMap := make(map[int]string)
+	for _, route := range config.Routes {
+		if existingName, exists := idMap[route.ID]; exists {
+			return fmt.Errorf("duplicate route ID %d found: '%s' and '%s'", 
+				route.ID, existingName, route.Name)
+		}
+		idMap[route.ID] = route.Name
+	}
+
+	// Check for duplicate URIs
+	uriMap := make(map[string]string)
+	for _, route := range config.Routes {
+		if existingName, exists := uriMap[route.URI]; exists {
+			log.Printf("⚠️  Warning: Duplicate URI %s found: '%s' and '%s'", 
+				route.URI, existingName, route.Name)
+		}
+		uriMap[route.URI] = route.Name
+	}
+
+	// Validate required fields
+	for _, route := range config.Routes {
+		if route.Name == "" {
+			return fmt.Errorf("route ID %d is missing a name", route.ID)
+		}
+		if route.URI == "" {
+			return fmt.Errorf("route '%s' is missing URI", route.Name)
+		}
+		if len(route.Methods) == 0 {
+			return fmt.Errorf("route '%s' has no HTTP methods defined", route.Name)
+		}
+		if len(route.Upstream.Nodes) == 0 {
+			return fmt.Errorf("route '%s' has no upstream nodes defined", route.Name)
+		}
+	}
+
+	log.Printf("✅ Configuration validation passed: %d routes, %d upstreams", 
+		len(config.Routes), len(config.Upstreams))
+	return nil
+}
+
+// GetConfigStats returns statistics about the current configuration
+func (rs *RouteService) GetConfigStats() (map[string]interface{}, error) {
+	config, err := rs.readConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config: %w", err)
+	}
+
+	// Count methods
+	methodCount := make(map[string]int)
+	pluginCount := make(map[string]int)
+	
+	for _, route := range config.Routes {
+		for _, method := range route.Methods {
+			methodCount[method]++
+		}
+		for plugin := range route.Plugins {
+			pluginCount[plugin]++
+		}
+	}
+
+	stats := map[string]interface{}{
+		"total_routes":    len(config.Routes),
+		"total_upstreams": len(config.Upstreams),
+		"methods_usage":   methodCount,
+		"plugins_usage":   pluginCount,
+		"config_file":     rs.configPath,
+		"last_modified":   time.Now().Format(time.RFC3339),
+	}
+
+	return stats, nil
 }
