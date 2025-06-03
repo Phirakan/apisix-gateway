@@ -1,4 +1,4 @@
-// backend/routes/routes.go (Fixed imports)
+// backend/routes/routes.go (เพิ่ม endpoints ใหม่)
 package routes
 
 import (
@@ -46,6 +46,10 @@ func SetupRoutes(app *fiber.App, db *gorm.DB) {
 	routes.Post("/quick", routeController.CreateQuickRoute) // POST /api/routes/quick - Create route from template
 	routes.Get("/templates", routeController.GetRouteTemplates) // GET /api/routes/templates - Get available templates
 	routes.Post("/reload", routeController.ReloadAPISIX)    // POST /api/routes/reload - Reload APISIX config
+	
+	// NEW: Configuration management endpoints
+	routes.Get("/validate", routeController.ValidateConfig) // GET /api/routes/validate - Validate config
+	routes.Get("/config", routeController.GetConfigInfo)    // GET /api/routes/config - Get config info
 
 	// Upstreams management
 	api.Get("/upstreams", routeController.GetUpstreams)     // GET /api/upstreams - List all upstreams
@@ -55,14 +59,21 @@ func SetupRoutes(app *fiber.App, db *gorm.DB) {
 	app.Get("/", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"message": "APISIX GoFiber Backend with Dynamic Route Management",
-			"version": "2.0.0",
+			"version": "2.1.0",
 			"features": []string{
-				"Dynamic Route Management",
+				"Dynamic Route Management with Shared Volume",
 				"APISIX Configuration API",
 				"Real-time Route Updates",
 				"Template-based Route Creation",
+				"Configuration Validation",
 				"Health Monitoring",
 				"Data CRUD Operations",
+				"Automatic Config Backup",
+			},
+			"config": fiber.Map{
+				"shared_volume_path": "/shared/apisix.yaml",
+				"docker_compose":     "Configured for container communication",
+				"auto_sync":          "Configuration synced between containers",
 			},
 			"endpoints": fiber.Map{
 				"health": fiber.Map{
@@ -87,12 +98,15 @@ func SetupRoutes(app *fiber.App, db *gorm.DB) {
 					"quick_create":    "POST /api/routes/quick",
 					"templates":       "GET /api/routes/templates",
 					"reload_apisix":   "POST /api/routes/reload",
+					"validate_config": "GET /api/routes/validate",
+					"config_info":     "GET /api/routes/config",
 					"list_upstreams":  "GET /api/upstreams",
 				},
 			},
 			"usage": fiber.Map{
 				"dashboard_url": "http://localhost:5173",
 				"gateway_url":   "http://localhost:9080",
+				"restart_cmd":   "docker-compose restart apisix_api",
 				"examples": fiber.Map{
 					"create_wordpress_route": fiber.Map{
 						"method": "POST",
@@ -125,7 +139,7 @@ func SetupRoutes(app *fiber.App, db *gorm.DB) {
 			},
 			"status": "ready",
 			"timestamp": fiber.Map{
-				"server_start": "Ready for dynamic route management",
+				"server_start": "Ready for dynamic route management with shared volumes",
 			},
 		})
 	})
@@ -135,8 +149,16 @@ func SetupRoutes(app *fiber.App, db *gorm.DB) {
 	api.Get("/debug/config", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"message": "APISIX Configuration Debug Info",
-			"config_file": "/app/apisix.yaml",
-			"status": "Route management active",
+			"config_files": fiber.Map{
+				"shared_volume": "/shared/apisix.yaml",
+				"host_mount":   "./apisix/apisix.yaml",
+			},
+			"docker_setup": fiber.Map{
+				"apisix_container":   "Uses shared volume: apisix_config_volume",
+				"gofiber_container": "Uses shared volume: apisix_config_volume mounted at /shared",
+				"config_sync":       "Automatic sync between containers",
+			},
+			"status": "Route management active with shared volume configuration",
 			"note": "Check logs for configuration changes",
 		})
 	})
@@ -147,11 +169,36 @@ func SetupRoutes(app *fiber.App, db *gorm.DB) {
 			"message": "pong",
 			"status":  "ok",
 			"service": "gofiber-backend",
+			"config":  "shared-volume-enabled",
 			"features": []string{
 				"route-management",
+				"shared-volume-config",
 				"data-api",
 				"health-checks",
+				"config-validation",
 			},
+		})
+	})
+
+	// Configuration status endpoint
+	api.Get("/status/config", func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{
+			"message": "Configuration Status",
+			"shared_volume": fiber.Map{
+				"enabled": true,
+				"path":    "/shared/apisix.yaml",
+				"sync":    "automatic",
+			},
+			"container_communication": fiber.Map{
+				"apisix_to_gofiber": "via Docker network: gateway-net",
+				"config_sharing":    "via named volume: apisix_config_volume",
+			},
+			"restart_required": fiber.Map{
+				"when":    "After route configuration changes",
+				"command": "docker-compose restart apisix_api",
+				"reason":  "APISIX needs to reload configuration file",
+			},
+			"status": "ready",
 		})
 	})
 }

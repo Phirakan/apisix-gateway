@@ -9,10 +9,11 @@ services:
       - "9180:9180"
     volumes:
       - ./apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
-      - apisix_config_volume:/usr/local/apisix/conf  # ใช้ named volume แทน bind mount
+      - apisix_config_volume:/usr/local/apisix/conf
     environment:
       - APISIX_STAND_ALONE=true
     restart: unless-stopped
+    user: root  
     command: >
       sh -c "
         echo '=== APISIX Standalone Setup with Dynamic Route Management ===' &&
@@ -21,10 +22,8 @@ services:
         echo 'Setting up apisix.yaml...' &&
         if [ ! -f /usr/local/apisix/conf/apisix.yaml ]; then
           echo 'Creating initial apisix.yaml...' &&
-          cat > /usr/local/apisix/conf/apisix.yaml << 'EOF'
-      routes: []
-      upstreams: []
-      EOF
+          echo 'routes: []' > /usr/local/apisix/conf/apisix.yaml &&
+          echo 'upstreams: []' >> /usr/local/apisix/conf/apisix.yaml
         else
           echo 'Using existing apisix.yaml...' &&
           cp /usr/local/apisix/conf/apisix.yaml /usr/local/apisix/conf/apisix.yaml.bak
@@ -122,8 +121,8 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - apisix_config_volume:/shared  # ใช้ shared volume กับ APISIX
-      - route_backups:/app/backups    # Volume สำหรับ backups
+      - apisix_config_volume:/shared
+      - route_backups:/app/backups
     depends_on:
       mariadb:
         condition: service_healthy
@@ -136,7 +135,7 @@ services:
       retries: 5
       start_period: 60s
 
-  # Service สำหรับ sync config ระหว่าง containers
+  # Enhanced config sync service
   config-sync:
     image: alpine:latest
     container_name: config-sync
@@ -146,24 +145,50 @@ services:
       - ./apisix/apisix.yaml:/host-config/apisix.yaml:rw
     command: >
       sh -c "
-        echo '=== Config Sync Service ===' &&
+        echo '=== Config Sync Service Started ===' &&
+        echo 'Initializing configuration sync...' &&
+        
+        # Create initial config if not exists
+        if [ ! -f /apisix-config/apisix.yaml ]; then
+          echo 'Creating initial shared config...' &&
+          echo 'routes: []' > /apisix-config/apisix.yaml &&
+          echo 'upstreams: []' >> /apisix-config/apisix.yaml &&
+          chmod 666 /apisix-config/apisix.yaml
+        fi &&
+        
+        # Copy from host to shared volume initially
+        if [ -f /host-config/apisix.yaml ] && [ -s /host-config/apisix.yaml ]; then
+          echo 'Copying existing host config to shared volume...' &&
+          cp /host-config/apisix.yaml /apisix-config/apisix.yaml &&
+          chmod 666 /apisix-config/apisix.yaml
+        fi &&
+        
+        echo 'Starting continuous sync loop...' &&
         while true; do
+          # Sync from shared volume to host (for backup/viewing)
           if [ -f /apisix-config/apisix.yaml ]; then
-            echo 'Syncing config from container to host...' &&
-            cp /apisix-config/apisix.yaml /host-config/apisix.yaml 2>/dev/null || true
+            if [ ! -f /host-config/apisix.yaml ] || [ /apisix-config/apisix.yaml -nt /host-config/apisix.yaml ]; then
+              echo 'Syncing config from shared volume to host...' &&
+              cp /apisix-config/apisix.yaml /host-config/apisix.yaml 2>/dev/null || true
+            fi
           fi &&
+          
+          # Sync from host to shared volume (for manual edits)
           if [ -f /host-config/apisix.yaml ]; then
-            echo 'Syncing config from host to container...' &&
-            cp /host-config/apisix.yaml /apisix-config/apisix.yaml 2>/dev/null || true &&
-            chmod 666 /apisix-config/apisix.yaml 2>/dev/null || true
+            if [ ! -f /apisix-config/apisix.yaml ] || [ /host-config/apisix.yaml -nt /apisix-config/apisix.yaml ]; then
+              echo 'Syncing config from host to shared volume...' &&
+              cp /host-config/apisix.yaml /apisix-config/apisix.yaml 2>/dev/null || true &&
+              chmod 666 /apisix-config/apisix.yaml 2>/dev/null || true
+            fi
           fi &&
-          sleep 5
+          
+          sleep 10
         done
       "
     networks:
       - gateway-net
     depends_on:
-      - apisix_api
+      - gofiber-backend
 
   apisix-dashboard:
     build:
@@ -193,4 +218,4 @@ volumes:
   mariadb_data:
   wordpress_data:
   route_backups:
-  apisix_config_volume:  # Shared volume สำหรับ config ระหว่าง APISIX และ GoFiber
+  apisix_config_volume:
