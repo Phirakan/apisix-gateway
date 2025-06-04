@@ -1,4 +1,3 @@
-// backend/main.go (Updated)
 package main
 
 import (
@@ -12,6 +11,7 @@ import (
 	"apisix-backend/database"
 	"apisix-backend/middleware"
 	"apisix-backend/routes"
+	"apisix-backend/service"
 
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
@@ -21,7 +21,7 @@ func main() {
 	// Load configuration
 	cfg := config.Load()
 	
-	log.Println("🚀 Starting APISIX GoFiber Backend Server with Route Management...")
+	log.Println("🚀 Starting APISIX GoFiber Backend Server with API Key Authentication...")
 	log.Printf("📋 Environment: %s", cfg.Server.Environment)
 	
 	// Validate configuration
@@ -31,7 +31,7 @@ func main() {
 	
 	// เพิ่มการรอ MariaDB ให้พร้อม
 	log.Println("⏳ Waiting for MariaDB to be ready...")
-	time.Sleep(10 * time.Second) // รอ MariaDB เริ่มต้น
+	time.Sleep(10 * time.Second)
 	
 	// Connect to database with retry
 	log.Println("🗄️  Connecting to MariaDB...")
@@ -71,7 +71,27 @@ func main() {
 	if err := database.Migrate(db); err != nil {
 		log.Fatal("❌ Failed to migrate database:", err)
 	}
+	
+	// Run API key migrations
+	if err := database.MigrateAPIKeyTables(db); err != nil {
+		log.Fatal("❌ Failed to migrate API key tables:", err)
+	}
+	
 	log.Println("✅ Database migrations completed")
+	
+	// Initialize API Key Service
+	log.Println("🔑 Initializing API Key Service...")
+	apiKeyService := services.NewAPIKeyService(db)
+	
+	// Create default API keys for development
+	if cfg.Features.EnableSampleData {
+		log.Println("🔑 Creating default API keys...")
+		if err := apiKeyService.CreateDefaultAPIKeys(); err != nil {
+			log.Printf("⚠️  Warning: Failed to create default API keys: %v", err)
+		} else {
+			log.Println("✅ Default API keys created successfully")
+		}
+	}
 	
 	// Seed sample data if enabled
 	if cfg.Features.EnableSampleData {
@@ -87,10 +107,9 @@ func main() {
 	log.Println("🔧 Checking route management configuration...")
 	routeConfigPath := os.Getenv("ROUTE_CONFIG_PATH")
 	if routeConfigPath == "" {
-		routeConfigPath = "/app/apisix.yaml" // Default path
+		routeConfigPath = "/app/apisix.yaml"
 	}
 	
-	// Check if apisix.yaml file exists and is accessible
 	if _, err := os.Stat(routeConfigPath); err != nil {
 		log.Printf("⚠️  Warning: Route config file not found at %s: %v", routeConfigPath, err)
 		log.Println("📝 Route management will use fallback configuration")
@@ -102,8 +121,8 @@ func main() {
 	// Create Fiber app with optimized configuration
 	app := fiber.New(fiber.Config{
 		Prefork:               cfg.Server.Prefork,
-		ServerHeader:          "GoFiber APISIX Backend with Route Management",
-		AppName:               "APISIX Backend with Route Management v2.0.0",
+		ServerHeader:          "GoFiber APISIX Backend with API Key Auth",
+		AppName:               "APISIX Backend with API Key Authentication v2.1.0",
 		BodyLimit:             int(cfg.Security.MaxRequestSize),
 		ReadTimeout:           time.Duration(cfg.Server.ReadTimeout) * time.Second,
 		WriteTimeout:          time.Duration(cfg.Server.WriteTimeout) * time.Second,
@@ -137,27 +156,24 @@ func main() {
 	app.Use(middleware.RequestID())
 	app.Use(middleware.JSONOnly())
 	app.Use(middleware.ValidateContentLength(cfg.Security.MaxRequestSize))
-	
-	// Setup API key authentication if enabled (but exclude route management endpoints)
-	if cfg.Security.EnableAPIKeyAuth && len(cfg.Security.APIKeys) > 0 {
-		app.Use("/api/data", middleware.APIKeyAuth(cfg.Security.APIKeys))
-		log.Printf("🔒 API Key authentication enabled for /api/data endpoints")
-		log.Printf("📝 Route management endpoints are accessible without API key for development")
-	}
 
-	// Setup routes (including route management)
-	log.Println("🛣️  Setting up routes...")
-	routes.SetupRoutes(app, db)
+	// Setup authentication routes
+	log.Println("🔑 Setting up authentication routes...")
+	routes.SetupAuthRoutes(app, apiKeyService)
+	
+	// Setup main routes with API key authentication
+	log.Println("🛣️  Setting up routes with API key authentication...")
+	routes.SetupRoutesWithAuth(app, db, apiKeyService)
+	
 	log.Println("✅ Routes configured successfully")
-	log.Println("🎯 Route management endpoints available:")
-	log.Println("   - GET    /api/routes (list all routes)")
-	log.Println("   - POST   /api/routes (create route)")
-	log.Println("   - GET    /api/routes/:id (get route by ID)")
-	log.Println("   - PUT    /api/routes/:id (update route)")
-	log.Println("   - DELETE /api/routes/:id (delete route)")
-	log.Println("   - POST   /api/routes/quick (quick route creation)")
-	log.Println("   - GET    /api/routes/templates (get templates)")
-	log.Println("   - POST   /api/routes/reload (reload APISIX)")
+	log.Println("🔑 API Key Authentication endpoints available:")
+	log.Println("   - POST   /api/auth/validate (validate API key)")
+	log.Println("   - GET    /api/auth/info (get current API key info)")
+	log.Println("   - POST   /api/auth/keys (create API key - admin)")
+	log.Println("   - GET    /api/auth/keys?user_id=admin (list API keys - admin)")
+	log.Println("   - PUT    /api/auth/keys/:id (update API key - admin)")
+	log.Println("   - DELETE /api/auth/keys/:id (delete API key - admin)")
+	log.Println("   - GET    /api/auth/test (test API key authentication)")
 
 	// Graceful shutdown
 	c := make(chan os.Signal, 1)
@@ -167,14 +183,12 @@ func main() {
 		<-c
 		log.Println("🛑 Gracefully shutting down...")
 		
-		// Close database connection
 		if err := database.Close(db); err != nil {
 			log.Printf("❌ Error closing database: %v", err)
 		} else {
 			log.Println("✅ Database connection closed")
 		}
 		
-		// Shutdown server
 		if err := app.Shutdown(); err != nil {
 			log.Printf("❌ Error shutting down server: %v", err)
 		} else {
@@ -188,13 +202,13 @@ func main() {
 	log.Printf("📋 Available endpoints:")
 	log.Printf("   Health Check:       http://%s/api/health", address)
 	log.Printf("   API Docs:           http://%s/", address)
-	log.Printf("   Data API:           http://%s/api/data", address)
-	log.Printf("   Route Management:   http://%s/api/routes", address)
-	log.Printf("   Upstreams:          http://%s/api/upstreams", address)
+	log.Printf("   Data API:           http://%s/api/data (API key required)", address)
+	log.Printf("   Route Management:   http://%s/api/routes (API key required)", address)
+	log.Printf("   Authentication:     http://%s/api/auth", address)
 	log.Printf("   Dashboard:          http://localhost:5173")
 	log.Println("")
-	log.Println("🎉 GoFiber backend with Route Management ready!")
-	log.Println("💡 Use the React Dashboard to manage APISIX routes dynamically")
+	log.Println("🎉 GoFiber backend with API Key Authentication ready!")
+	log.Println("🔑 Use the /api/auth endpoints to manage API keys")
 	
 	if cfg.Security.EnableHTTPS {
 		log.Printf("🔒 HTTPS enabled")
