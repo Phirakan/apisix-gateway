@@ -114,7 +114,7 @@ services:
       DB_PASSWORD: apisix_pass
       DB_NAME: apisix_db
       PORT: 3000
-      ENVIRONMENT: production
+      ENVIRONMENT: development
       DEBUG: false
       ENABLE_CORS: true
       ROUTE_CONFIG_PATH: /shared/apisix.yaml
