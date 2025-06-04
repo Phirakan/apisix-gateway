@@ -14,39 +14,43 @@ services:
     environment:
       - APISIX_STAND_ALONE=true
     restart: unless-stopped
-    user: root  # ใช้ root เพื่อให้ install packages ได้
+    user: root
     command: >
       sh -c "
         echo '=== APISIX Standalone Setup ===' &&
-        echo 'Installing netcat for connectivity tests...' &&
-        apt-get update > /dev/null 2>&1 && apt-get install -y netcat-openbsd > /dev/null 2>&1 &&
+        echo 'Installing required packages...' &&
+        apt-get update > /dev/null 2>&1 && 
+        apt-get install -y curl netcat-openbsd > /dev/null 2>&1 &&
+        echo 'Cleaning up old socket files...' &&
+        rm -f /usr/local/apisix/logs/worker_events.sock &&
+        rm -f /usr/local/apisix/logs/nginx.pid &&
         echo 'Checking config files...' &&
         ls -la /usr/local/apisix/conf/ &&
-        echo 'Config content (first 10 lines):' &&
-        head -10 /usr/local/apisix/conf/config.yaml &&
-        echo 'Routes content (first 20 lines):' &&
-        head -20 /usr/local/apisix/conf/apisix.yaml &&
+        echo 'Validating YAML configuration...' &&
+        if ! grep -q '#END' /usr/local/apisix/conf/apisix.yaml; then
+          echo 'ERROR: apisix.yaml missing end marker! Please add #END at the end of the file.' &&
+          exit 1
+        fi &&
+        echo 'YAML validation passed' &&
         echo 'Routes count:' &&
         grep -c 'id:' /usr/local/apisix/conf/apisix.yaml &&
-        echo 'Waiting for backends (45s)...' &&
-        sleep 45 &&
+        echo 'Waiting for backends (60s)...' &&
+        sleep 60 &&
         echo 'Testing backend connectivity...' &&
-        timeout 10 sh -c 'until nc -z gofiber-backend 3000; do echo \"Waiting for GoFiber...\"; sleep 2; done' &&
-        timeout 10 sh -c 'until nc -z wordpress 80; do echo \"Waiting for WordPress...\"; sleep 2; done' &&
+        timeout 15 sh -c 'until nc -z gofiber-backend 3000; do echo \"Waiting for GoFiber...\"; sleep 3; done' &&
+        timeout 15 sh -c 'until nc -z wordpress 80; do echo \"Waiting for WordPress...\"; sleep 3; done' &&
+        echo 'Backends are ready!' &&
         echo 'Starting APISIX...' &&
         /usr/bin/apisix init &&
         /usr/bin/apisix start &&
-        echo 'APISIX started successfully!' &&
-        echo 'Waiting 10 seconds for APISIX to fully load...' &&
-        sleep 10 &&
+        echo 'APISIX started, waiting for initialization...' &&
+        sleep 15 &&
         echo 'Testing APISIX endpoints...' &&
-        curl -s -f http://localhost:9080/ && echo 'Root endpoint: OK' || echo 'Root endpoint: FAILED' &&
-        curl -s -f http://localhost:9080/api/health && echo 'Health endpoint: OK' || echo 'Health endpoint: FAILED' &&
+        timeout 10 curl -s -f http://localhost:9080/ > /dev/null && echo 'Root endpoint: OK' || echo 'Root endpoint: FAILED' &&
+        timeout 10 curl -s -f http://localhost:9080/api/health > /dev/null && echo 'Health endpoint: OK' || echo 'Health endpoint: FAILED' &&
         echo 'APISIX is ready!' &&
-        echo 'Gateway available at: http://localhost:9080' &&
-        echo 'Dashboard available at: http://localhost:5173' &&
-        echo 'Testing GoFiber backend directly...' &&
-        curl -s http://gofiber-backend:3000/api/health | head -1 || echo 'GoFiber direct test failed' &&
+        echo 'Gateway: http://localhost:9080' &&
+        echo 'Dashboard: http://localhost:5173' &&
         echo 'Monitoring logs...' &&
         tail -f /usr/local/apisix/logs/error.log
       "
@@ -58,11 +62,11 @@ services:
       gofiber-backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9080/", "||", "exit", "1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:9080/ || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 120s
+      start_period: 180s
 
   mariadb:
     image: mariadb:10.6
@@ -147,7 +151,6 @@ services:
       retries: 5
       start_period: 60s
 
-  # Enhanced config sync service
   config-sync:
     image: alpine:latest
     container_name: config-sync
@@ -158,37 +161,31 @@ services:
     command: >
       sh -c "
         echo '=== Config Sync Service Started ===' &&
-        echo 'Initializing configuration sync...' &&
         
-        # Create initial config if not exists
         if [ ! -f /apisix-config/apisix.yaml ]; then
           echo 'Creating initial shared config...' &&
           echo 'routes: []' > /apisix-config/apisix.yaml &&
           echo 'upstreams: []' >> /apisix-config/apisix.yaml &&
+          echo '#END' >> /apisix-config/apisix.yaml &&
           chmod 666 /apisix-config/apisix.yaml
         fi &&
         
-        # Copy from host to shared volume initially
         if [ -f /host-config/apisix.yaml ] && [ -s /host-config/apisix.yaml ]; then
           echo 'Copying existing host config to shared volume...' &&
           cp /host-config/apisix.yaml /apisix-config/apisix.yaml &&
           chmod 666 /apisix-config/apisix.yaml
         fi &&
         
-        echo 'Starting continuous sync loop...' &&
+        echo 'Starting continuous sync...' &&
         while true; do
-          # Sync from shared volume to host (for backup/viewing)
           if [ -f /apisix-config/apisix.yaml ]; then
             if [ ! -f /host-config/apisix.yaml ] || [ /apisix-config/apisix.yaml -nt /host-config/apisix.yaml ]; then
-              echo 'Syncing config from shared volume to host...' &&
               cp /apisix-config/apisix.yaml /host-config/apisix.yaml 2>/dev/null || true
             fi
           fi &&
           
-          # Sync from host to shared volume (for manual edits)
           if [ -f /host-config/apisix.yaml ]; then
             if [ ! -f /apisix-config/apisix.yaml ] || [ /host-config/apisix.yaml -nt /apisix-config/apisix.yaml ]; then
-              echo 'Syncing config from host to shared volume...' &&
               cp /host-config/apisix.yaml /apisix-config/apisix.yaml 2>/dev/null || true &&
               chmod 666 /apisix-config/apisix.yaml 2>/dev/null || true
             fi

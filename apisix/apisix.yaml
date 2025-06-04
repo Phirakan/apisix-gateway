@@ -1,6 +1,7 @@
-# apisix/apisix.yaml - แก้ไขให้ทำงานได้ถูกต้อง
+#END
+# APISIX Routes Configuration - Fixed Version
 routes:
-  # Route 1: Root endpoint - ส่งไปยัง GoFiber root
+  # Route 1: Root endpoint
   - id: 1
     name: "APISIX Root"
     desc: "Root endpoint showing API information"
@@ -50,7 +51,7 @@ routes:
         expose_headers: "Content-Length,X-Total-Count"
         max_age: 86400
 
-  # Route 3: GoFiber Data API - แก้ไข URI pattern
+  # Route 3: GoFiber Data API
   - id: 3
     name: "GoFiber Data API"
     desc: "GoFiber backend data operations"
@@ -78,7 +79,7 @@ routes:
         expose_headers: "Content-Length,X-Total-Count"
         max_age: 86400
 
-  # Route 3b: GoFiber Data API with ID - สำหรับ /api/data/:id
+  # Route 3b: GoFiber Data API with ID
   - id: 31
     name: "GoFiber Data API with ID"
     desc: "GoFiber backend data operations with ID"
@@ -106,7 +107,7 @@ routes:
         expose_headers: "Content-Length,X-Total-Count"
         max_age: 86400
 
-  # Route 4: WordPress Posts API - แก้ไข
+  # Route 4: WordPress Posts API
   - id: 4
     name: "WordPress Posts API"
     desc: "WordPress REST API for posts"
@@ -168,38 +169,6 @@ routes:
           - "^/api/posts/(.*)"
           - "/wp-json/wp/v2/posts/$1"
 
-  # Route 5: WordPress General API
-  - id: 5
-    name: "WordPress Custom API"
-    desc: "WordPress API route for custom endpoints"
-    uri: "/api/wp/*"
-    methods:
-      - GET
-      - POST
-      - PUT
-      - DELETE
-      - OPTIONS
-    upstream:
-      type: roundrobin
-      nodes:
-        "wordpress:80": 1
-      timeout:
-        connect: 6
-        send: 6
-        read: 6
-    plugins:
-      cors:
-        allow_credentials: false
-        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With"
-        allow_methods: "GET,POST,PUT,DELETE,OPTIONS"
-        allow_origins: "*"
-        expose_headers: "Content-Length,X-Total-Count"
-        max_age: 86400
-      proxy-rewrite:
-        regex_uri:
-          - "^/api/wp/(.*)"
-          - "/wp-json/wp/v2/$1"
-
   # Route 6: GoFiber Route Management API
   - id: 6
     name: "Route Management API"
@@ -256,31 +225,6 @@ routes:
         expose_headers: "Content-Length,X-Total-Count"
         max_age: 86400
 
-  # Route 7: GoFiber Upstreams API
-  - id: 7
-    name: "Upstreams API"
-    desc: "Upstreams management endpoints"
-    uri: "/api/upstreams"
-    methods:
-      - GET
-      - OPTIONS
-    upstream:
-      type: roundrobin
-      nodes:
-        "gofiber-backend:3000": 1
-      timeout:
-        connect: 6
-        send: 6
-        read: 6
-    plugins:
-      cors:
-        allow_credentials: false
-        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With"
-        allow_methods: "GET,OPTIONS"
-        allow_origins: "*"
-        expose_headers: "Content-Length,X-Total-Count"
-        max_age: 86400
-
 upstreams:
   - id: 1
     name: "WordPress Upstream"
@@ -303,4 +247,5 @@ upstreams:
       connect: 6
       send: 6
       read: 6
-      
+
+#END
