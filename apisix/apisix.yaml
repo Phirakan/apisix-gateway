@@ -1,7 +1,7 @@
 #END
-# APISIX Routes Configuration - Fixed Version
+# APISIX Routes Configuration - With API Key Authentication
 routes:
-  # Route 1: Root endpoint
+  # Route 1: Root endpoint (No Auth Required)
   - id: 1
     name: "APISIX Root"
     desc: "Root endpoint showing API information"
@@ -26,7 +26,7 @@ routes:
         expose_headers: "Content-Length,X-Total-Count"
         max_age: 86400
 
-  # Route 2: GoFiber Health Check
+  # Route 2: GoFiber Health Check (No Auth Required)
   - id: 2
     name: "GoFiber Health Check"
     desc: "Health check endpoint for GoFiber backend"
@@ -51,10 +51,10 @@ routes:
         expose_headers: "Content-Length,X-Total-Count"
         max_age: 86400
 
-  # Route 3: GoFiber Data API
+  # Route 3: GoFiber Data API (API Key Required)
   - id: 3
     name: "GoFiber Data API"
-    desc: "GoFiber backend data operations"
+    desc: "GoFiber backend data operations - API Key Required"
     uri: "/api/data"
     methods:
       - GET
@@ -71,6 +71,8 @@ routes:
         send: 6
         read: 6
     plugins:
+      key-auth:
+        header: "X-API-Key"
       cors:
         allow_credentials: false
         allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With,X-API-Key"
@@ -79,10 +81,10 @@ routes:
         expose_headers: "Content-Length,X-Total-Count"
         max_age: 86400
 
-  # Route 3b: GoFiber Data API with ID
+  # Route 3b: GoFiber Data API with ID (API Key Required)
   - id: 31
     name: "GoFiber Data API with ID"
-    desc: "GoFiber backend data operations with ID"
+    desc: "GoFiber backend data operations with ID - API Key Required"
     uri: "/api/data/*"
     methods:
       - GET
@@ -99,6 +101,8 @@ routes:
         send: 6
         read: 6
     plugins:
+      key-auth:
+        header: "X-API-Key"
       cors:
         allow_credentials: false
         allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With,X-API-Key"
@@ -107,7 +111,7 @@ routes:
         expose_headers: "Content-Length,X-Total-Count"
         max_age: 86400
 
-  # Route 4: WordPress Posts API
+  # Route 4: WordPress Posts API (No Auth Required)
   - id: 4
     name: "WordPress Posts API"
     desc: "WordPress REST API for posts"
@@ -137,7 +141,7 @@ routes:
       proxy-rewrite:
         uri: "/wp-json/wp/v2/posts"
 
-  # Route 4b: WordPress Posts API with ID
+  # Route 4b: WordPress Posts API with ID (No Auth Required)
   - id: 41
     name: "WordPress Posts API with ID"
     desc: "WordPress REST API for posts with ID"
@@ -169,16 +173,13 @@ routes:
           - "^/api/posts/(.*)"
           - "/wp-json/wp/v2/posts/$1"
 
-  # Route 6: GoFiber Route Management API
+  # Route 6: Route Management API (API Key Required for Write Operations)
   - id: 6
-    name: "Route Management API"
-    desc: "Dynamic route management endpoints"
+    name: "Route Management API - Read Only"
+    desc: "Route management read operations - No Auth Required"
     uri: "/api/routes"
     methods:
       - GET
-      - POST
-      - PUT
-      - DELETE
       - OPTIONS
     upstream:
       type: roundrobin
@@ -191,16 +192,44 @@ routes:
     plugins:
       cors:
         allow_credentials: false
-        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With"
-        allow_methods: "GET,POST,PUT,DELETE,OPTIONS"
+        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With,X-API-Key"
+        allow_methods: "GET,OPTIONS"
         allow_origins: "*"
         expose_headers: "Content-Length,X-Total-Count"
         max_age: 86400
 
-  # Route 6b: Route Management API with paths
+  # Route 6a: Route Management API - Write Operations (API Key Required)
+  - id: 60
+    name: "Route Management API - Write Operations"
+    desc: "Route management write operations - API Key Required"
+    uri: "/api/routes"
+    methods:
+      - POST
+      - PUT
+      - DELETE
+    upstream:
+      type: roundrobin
+      nodes:
+        "gofiber-backend:3000": 1
+      timeout:
+        connect: 6
+        send: 6
+        read: 6
+    plugins:
+      key-auth:
+        header: "X-API-Key"
+      cors:
+        allow_credentials: false
+        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With,X-API-Key"
+        allow_methods: "POST,PUT,DELETE,OPTIONS"
+        allow_origins: "*"
+        expose_headers: "Content-Length,X-Total-Count"
+        max_age: 86400
+
+  # Route 6b: Route Management API with paths (API Key Required)
   - id: 61
     name: "Route Management API Extended"
-    desc: "Dynamic route management endpoints with paths"
+    desc: "Route management detailed operations - API Key Required"
     uri: "/api/routes/*"
     methods:
       - GET
@@ -217,13 +246,68 @@ routes:
         send: 6
         read: 6
     plugins:
+      key-auth:
+        header: "X-API-Key"
       cors:
         allow_credentials: false
-        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With"
+        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With,X-API-Key"
         allow_methods: "GET,POST,PUT,DELETE,OPTIONS"
         allow_origins: "*"
         expose_headers: "Content-Length,X-Total-Count"
         max_age: 86400
+
+  # Route 7: Upstreams API (API Key Required)
+  - id: 7
+    name: "Upstreams API"
+    desc: "Upstreams management endpoints - API Key Required"
+    uri: "/api/upstreams"
+    methods:
+      - GET
+      - OPTIONS
+    upstream:
+      type: roundrobin
+      nodes:
+        "gofiber-backend:3000": 1
+      timeout:
+        connect: 6
+        send: 6
+        read: 6
+    plugins:
+      key-auth:
+        header: "X-API-Key"
+      cors:
+        allow_credentials: false
+        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With,X-API-Key"
+        allow_methods: "GET,OPTIONS"
+        allow_origins: "*"
+        expose_headers: "Content-Length,X-Total-Count"
+        max_age: 86400
+
+# Define consumers with API keys
+consumers:
+  - username: "admin-user"
+    desc: "Admin user with full access"
+    plugins:
+      key-auth:
+        key: "admin-api-key-2024"
+
+  - username: "developer-user"
+    desc: "Developer user with limited access"
+    plugins:
+      key-auth:
+        key: "dev-api-key-2024"
+
+  - username: "frontend-app"
+    desc: "Frontend application API key"
+    plugins:
+      key-auth:
+        key: "frontend-app-key-2024"
+
+  - username: "mobile-app"
+    desc: "Mobile application API key"
+    plugins:
+      key-auth:
+        key: "mobile-app-key-2024"
 
 upstreams:
   - id: 1

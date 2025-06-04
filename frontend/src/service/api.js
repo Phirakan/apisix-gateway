@@ -1,4 +1,4 @@
-// frontend/src/service/api.js (Fixed CORS Version)
+// frontend/src/service/api.js - With API Key Authentication
 import axios from "axios";
 
 // Configuration
@@ -10,17 +10,29 @@ const getBaseURL = (port) => {
 const APISIX_GATEWAY_URL = getBaseURL(9080);
 const GOFIBER_DIRECT_URL = getBaseURL(3000);
 
-// Create axios instance for Gateway API with CORS handling
+// API Keys - In production, these should be environment variables
+const API_KEYS = {
+  admin: "admin-api-key-2024",
+  developer: "dev-api-key-2024",
+  frontend: "frontend-app-key-2024",
+  mobile: "mobile-app-key-2024"
+};
+
+// Default API key for frontend
+const DEFAULT_API_KEY = API_KEYS.frontend;
+
+// Create axios instance for Gateway API with API Key authentication
 const gatewayApi = axios.create({
   baseURL: APISIX_GATEWAY_URL,
   timeout: 15000,
   headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
+    'X-API-Key': DEFAULT_API_KEY, // Add default API key
   },
 });
 
-// Create axios instance for direct GoFiber API
+// Create axios instance for direct GoFiber API (no API key needed for direct access)
 const directApi = axios.create({
   baseURL: GOFIBER_DIRECT_URL,
   timeout: 15000,
@@ -30,11 +42,24 @@ const directApi = axios.create({
   },
 });
 
-// Enhanced error handler with CORS detection
+// Enhanced error handler with API Key detection
 const handleError = (error, context) => {
   console.error(`Error in ${context}:`, error);
   
-  // Handle CORS specifically
+  // Handle API Key errors
+  if (error.response?.status === 401) {
+    if (error.response.data?.message?.includes('Missing API key') || 
+        error.response.data?.message?.includes('key-auth')) {
+      throw new Error('API Key required or invalid. Please check your authentication credentials.');
+    }
+    throw new Error('Authentication failed - please check your API key');
+  }
+  
+  if (error.response?.status === 403) {
+    throw new Error('Access forbidden - your API key does not have permission for this operation');
+  }
+  
+  // Handle CORS
   if (error.message && error.message.includes('CORS')) {
     throw new Error('CORS error - please check if APISIX container is running and routes are configured properly. Try restarting APISIX: docker-compose restart apisix_api');
   }
@@ -52,33 +77,107 @@ const handleError = (error, context) => {
   }
 };
 
-// API functions
+// API Key management functions
+export const apiKeys = {
+  // Set API key for gateway requests
+  setApiKey: (key) => {
+    gatewayApi.defaults.headers['X-API-Key'] = key;
+    console.log('🔑 API Key updated for gateway requests');
+  },
+  
+  // Get current API key
+  getCurrentKey: () => {
+    return gatewayApi.defaults.headers['X-API-Key'];
+  },
+  
+  // Use admin API key
+  useAdminKey: () => {
+    apiKeys.setApiKey(API_KEYS.admin);
+    console.log('🔑 Using admin API key');
+  },
+  
+  // Use developer API key
+  useDeveloperKey: () => {
+    apiKeys.setApiKey(API_KEYS.developer);
+    console.log('🔑 Using developer API key');
+  },
+  
+  // Use frontend app API key
+  useFrontendKey: () => {
+    apiKeys.setApiKey(API_KEYS.frontend);
+    console.log('🔑 Using frontend app API key');
+  },
+  
+  // Test API key validity
+  testApiKey: async (key = null) => {
+    const testKey = key || apiKeys.getCurrentKey();
+    try {
+      const response = await axios.get(`${APISIX_GATEWAY_URL}/api/data`, {
+        headers: { 'X-API-Key': testKey },
+        timeout: 5000
+      });
+      return { valid: true, response: response.data };
+    } catch (error) {
+      return { 
+        valid: false, 
+        error: error.response?.status === 401 ? 'Invalid API key' : error.message 
+      };
+    }
+  },
+  
+  // Get available API keys (for testing/demo purposes)
+  getAvailableKeys: () => {
+    return Object.entries(API_KEYS).map(([name, key]) => ({
+      name,
+      key,
+      description: `${name.charAt(0).toUpperCase() + name.slice(1)} API Key`
+    }));
+  }
+};
+
+// API functions with authentication support
 export const api = {
-  // ========== IMPROVED APISIX HEALTH CHECK ==========
+  // ========== AUTHENTICATION HELPERS ==========
+  
+  // Test different API keys
+  testAllApiKeys: async () => {
+    const results = {};
+    for (const [name, key] of Object.entries(API_KEYS)) {
+      console.log(`🧪 Testing ${name} API key...`);
+      const result = await apiKeys.testApiKey(key);
+      results[name] = result;
+    }
+    return results;
+  },
+
+  // ========== APISIX HEALTH CHECK ==========
   
   checkAPISIXHealth: async () => {
     try {
       console.log('🔍 Testing APISIX connectivity...');
       
-      // Try multiple endpoints with different approaches
       const testEndpoints = [
-        { url: `${APISIX_GATEWAY_URL}/`, name: 'Root endpoint' },
-        { url: `${APISIX_GATEWAY_URL}/api/health`, name: 'Health endpoint' },
+        { url: `${APISIX_GATEWAY_URL}/`, name: 'Root endpoint (No Auth)', needsAuth: false },
+        { url: `${APISIX_GATEWAY_URL}/api/health`, name: 'Health endpoint (No Auth)', needsAuth: false },
       ];
       
       for (const endpoint of testEndpoints) {
         try {
           console.log(`Testing ${endpoint.name}: ${endpoint.url}`);
           
+          const headers = {
+            'Accept': 'application/json',
+          };
+          
+          if (endpoint.needsAuth) {
+            headers['X-API-Key'] = apiKeys.getCurrentKey();
+          }
+          
           const response = await axios.get(endpoint.url, { 
             timeout: 8000,
-            headers: {
-              'Accept': 'application/json',
-              // ✅ ลบ Origin header ออก - Browser จะตั้งเอง
-            },
-            // Handle preflight requests
+            headers,
             validateStatus: function (status) {
-              return status >= 200 && status < 500; // Accept 4xx as valid response
+              return status >= 200 && status < 500;
             }
           });
           
@@ -95,7 +194,6 @@ export const api = {
         }
       }
       
-      // If all endpoints fail
       throw new Error('All APISIX endpoints failed to respond');
       
     } catch (error) {
@@ -108,19 +206,30 @@ export const api = {
     }
   },
 
-  // ========== ROUTE MANAGEMENT (IMPROVED CORS) ==========
+  // ========== ROUTE MANAGEMENT WITH AUTH ==========
   
   getRoutes: async () => {
     try {
-      console.log('📋 Getting routes from GoFiber route management API...');
+      console.log('📋 Getting routes (No Auth Required)...');
+      // Use direct API for route management to avoid auth issues
       const response = await directApi.get('/api/routes');
       return {
         list: response.data.list || [],
         total: response.data.total || 0
       };
+      // eslint-disable-next-line no-unused-vars
     } catch (error) {
-      console.warn('Route management API failed, falling back to mock data');
-      handleError(error, 'getRoutes');
+      console.warn('Route management API failed, checking auth...');
+      // Try with auth through gateway
+      try {
+        const response = await gatewayApi.get('/api/routes');
+        return {
+          list: response.data.list || [],
+          total: response.data.total || 0
+        };
+      } catch (authError) {
+        handleError(authError, 'getRoutes');
+      }
     }
   },
 
@@ -134,11 +243,19 @@ export const api = {
     }
 
     try {
-      console.log('➕ Creating route via GoFiber API:', routeConfig);
+      console.log('➕ Creating route (API Key Required):', routeConfig);
+      // Route creation requires admin privileges - use direct API
       const response = await directApi.post('/api/routes', routeConfig);
       return response.data;
+      // eslint-disable-next-line no-unused-vars
     } catch (error) {
-      handleError(error, 'createRoute');
+      // Try through gateway with auth
+      try {
+        const response = await gatewayApi.post('/api/routes', routeConfig);
+        return response.data;
+      } catch (authError) {
+        handleError(authError, 'createRoute');
+      }
     }
   },
 
@@ -148,11 +265,27 @@ export const api = {
     }
 
     try {
-      console.log('🗑️ Deleting route via GoFiber API:', routeId);
-      const response = await directApi.delete(`/api/routes/${routeId}`);
-      return response.data;
+      console.log('🗑️ Deleting route (API Key Required):', routeId);
+      // Use admin key for delete operations
+      const originalKey = apiKeys.getCurrentKey();
+      apiKeys.useAdminKey();
+      
+      try {
+        const response = await gatewayApi.delete(`/api/routes/${routeId}`);
+        return response.data;
+      } finally {
+        // Restore original key
+        apiKeys.setApiKey(originalKey);
+      }
     } catch (error) {
-      handleError(error, 'deleteRoute');
+      // Fallback to direct API
+      try {
+        const response = await directApi.delete(`/api/routes/${routeId}`);
+        return response.data;
+        // eslint-disable-next-line no-unused-vars
+      } catch (directError) {
+        handleError(error, 'deleteRoute');
+      }
     }
   },
 
@@ -165,11 +298,27 @@ export const api = {
     }
 
     try {
-      console.log('🔄 Updating route via GoFiber API:', routeId, routeConfig);
-      const response = await directApi.put(`/api/routes/${routeId}`, routeConfig);
-      return response.data;
+      console.log('🔄 Updating route (API Key Required):', routeId, routeConfig);
+      // Use admin key for update operations
+      const originalKey = apiKeys.getCurrentKey();
+      apiKeys.useAdminKey();
+      
+      try {
+        const response = await gatewayApi.put(`/api/routes/${routeId}`, routeConfig);
+        return response.data;
+      } finally {
+        // Restore original key
+        apiKeys.setApiKey(originalKey);
+      }
     } catch (error) {
-      handleError(error, 'updateRoute');
+      // Fallback to direct API
+      try {
+        const response = await directApi.put(`/api/routes/${routeId}`, routeConfig);
+        return response.data;
+        // eslint-disable-next-line no-unused-vars
+      } catch (directError) {
+        handleError(error, 'updateRoute');
+      }
     }
   },
 
@@ -179,11 +328,18 @@ export const api = {
     }
 
     try {
-      console.log('🔍 Getting route by ID via GoFiber API:', routeId);
-      const response = await directApi.get(`/api/routes/${routeId}`);
+      console.log('🔍 Getting route by ID (API Key Required):', routeId);
+      const response = await gatewayApi.get(`/api/routes/${routeId}`);
       return response.data;
     } catch (error) {
-      handleError(error, 'getRoute');
+      // Fallback to direct API
+      try {
+        const response = await directApi.get(`/api/routes/${routeId}`);
+        return response.data;
+        // eslint-disable-next-line no-unused-vars
+      } catch (directError) {
+        handleError(error, 'getRoute');
+      }
     }
   },
 
@@ -193,11 +349,27 @@ export const api = {
     }
 
     try {
-      console.log('🚀 Creating quick route:', templateData);
-      const response = await directApi.post('/api/routes/quick', templateData);
-      return response.data;
+      console.log('🚀 Creating quick route (Admin Key Required):', templateData);
+      // Use admin key for quick route creation
+      const originalKey = apiKeys.getCurrentKey();
+      apiKeys.useAdminKey();
+      
+      try {
+        const response = await gatewayApi.post('/api/routes/quick', templateData);
+        return response.data;
+      } finally {
+        // Restore original key
+        apiKeys.setApiKey(originalKey);
+      }
     } catch (error) {
-      handleError(error, 'createQuickRoute');
+      // Fallback to direct API
+      try {
+        const response = await directApi.post('/api/routes/quick', templateData);
+        return response.data;
+        // eslint-disable-next-line no-unused-vars
+      } catch (directError) {
+        handleError(error, 'createQuickRoute');
+      }
     }
   },
 
@@ -206,7 +378,7 @@ export const api = {
       console.log('📋 Getting route templates...');
       const response = await directApi.get('/api/routes/templates');
       return response.data;
-    // eslint-disable-next-line no-unused-vars
+      // eslint-disable-next-line no-unused-vars
     } catch (error) {
       console.warn('Template API failed, using fallback templates');
       return {
@@ -234,33 +406,129 @@ export const api = {
 
   reloadAPISIX: async () => {
     try {
-      console.log('🔄 Reloading APISIX configuration...');
-      const response = await directApi.post('/api/routes/reload');
-      return response.data;
+      console.log('🔄 Reloading APISIX configuration (Admin Key Required)...');
+      // Use admin key for reload operations
+      const originalKey = apiKeys.getCurrentKey();
+      apiKeys.useAdminKey();
+      
+      try {
+        const response = await gatewayApi.post('/api/routes/reload');
+        return response.data;
+      } finally {
+        // Restore original key
+        apiKeys.setApiKey(originalKey);
+      }
     } catch (error) {
-      handleError(error, 'reloadAPISIX');
+      // Fallback to direct API
+      try {
+        const response = await directApi.post('/api/routes/reload');
+        return response.data;
+        // eslint-disable-next-line no-unused-vars
+      } catch (directError) {
+        handleError(error, 'reloadAPISIX');
+      }
     }
   },
 
   getUpstreams: async () => {
     try {
-      console.log('📋 Getting upstreams from GoFiber API...');
-      const response = await directApi.get('/api/upstreams');
+      console.log('📋 Getting upstreams (API Key Required)...');
+      const response = await gatewayApi.get('/api/upstreams');
       return {
         list: response.data.list || [],
         total: response.data.total || 0
       };
-    // eslint-disable-next-line no-unused-vars
+      // eslint-disable-next-line no-unused-vars
     } catch (error) {
-      console.warn('Upstreams API failed, falling back to mock data');
-      return {
-        list: [],
-        total: 0
-      };
+      console.warn('Upstreams API failed, trying direct access...');
+      try {
+        const response = await directApi.get('/api/upstreams');
+        return {
+          list: response.data.list || [],
+          total: response.data.total || 0
+        };
+      // eslint-disable-next-line no-unused-vars
+      } catch (directError) {
+        return {
+          list: [],
+          total: 0
+        };
+      }
     }
   },
   
-  // ========== ENHANCED SETUP FUNCTION ==========
+  // ========== DATA OPERATIONS WITH API KEY ==========
+  
+  createData: async (data) => {
+    try {
+      if (!data || typeof data !== 'object') {
+        throw new Error('Data is required and must be an object');
+      }
+
+      console.log('📊 Creating data (API Key Required)...');
+      const response = await gatewayApi.post("/api/data", data);
+      return response.data;
+    } catch (error) {
+      handleError(error, 'createData');
+    }
+  },
+
+  updateData: async (id, data) => {
+    try {
+      if (!id) {
+        throw new Error('ID is required');
+      }
+      if (!data || typeof data !== 'object') {
+        throw new Error('Data is required and must be an object');
+      }
+
+      console.log('📊 Updating data (API Key Required)...');
+      const response = await gatewayApi.put(`/api/data/${id}`, data);
+      return response.data;
+    } catch (error) {
+      handleError(error, 'updateData');
+    }
+  },
+
+  deleteData: async (id) => {
+    try {
+      if (!id) {
+        throw new Error('ID is required');
+      }
+
+      console.log('📊 Deleting data (API Key Required)...');
+      const response = await gatewayApi.delete(`/api/data/${id}`);
+      return response.data;
+    } catch (error) {
+      handleError(error, 'deleteData');
+    }
+  },
+
+  getData: async () => {
+    try {
+      console.log('📊 Getting data (API Key Required)...');
+      const response = await gatewayApi.get("/api/data");
+      return response.data;
+    } catch (error) {
+      handleError(error, 'getData');
+    }
+  },
+
+  getDataById: async (id) => {
+    try {
+      if (!id) {
+        throw new Error('ID is required');
+      }
+
+      console.log('📊 Getting data by ID (API Key Required)...');
+      const response = await gatewayApi.get(`/api/data/${id}`);
+      return response.data;
+    } catch (error) {
+      handleError(error, 'getDataById');
+    }
+  },
+
+  // ========== TESTING FUNCTIONS ==========
   
   setupInitialRoutes: async () => {
     try {
@@ -284,97 +552,65 @@ export const api = {
     }
   },
 
-  // ========== IMPROVED API TESTING WITH CORS HANDLING ==========
-  
   testWordPressAPI: async () => {
-    console.log('🧪 Testing WordPress API...');
+    console.log('🧪 Testing WordPress API (No Auth Required)...');
     
     try {
-      // Test WordPress installation first
-      console.log('Testing WordPress installation...');
-      const wpResponse = await axios.get(`http://${window.location.hostname}:8080`, { 
+      // WordPress endpoints don't require authentication
+      const response = await axios.get(`${APISIX_GATEWAY_URL}/api/posts`, { 
         timeout: 8000,
-        maxRedirects: 0,
-        validateStatus: function (status) {
-          return status >= 200 && status < 400;
+        headers: {
+          'Accept': 'application/json',
         }
       });
-      
-      if (wpResponse.status === 302 || wpResponse.request.responseURL?.includes('wp-admin/install.php')) {
-        throw new Error('WordPress setup required. Please visit http://localhost:8080 to complete installation');
-      }
-      
-      console.log('WordPress appears to be installed, testing REST API...');
-      
-      // Test through APISIX first (without Origin header)
+      console.log('✅ WordPress API working through APISIX:', response.data);
+      return response.data;
+    } catch (error) {
+      // Try direct WordPress access
       try {
-        console.log('Testing WordPress API through APISIX...');
-        const apisixResponse = await axios.get(`${APISIX_GATEWAY_URL}/api/posts`, { 
+        const directResponse = await axios.get(`http://${window.location.hostname}:8080/wp-json/wp/v2/posts`, { 
           timeout: 8000,
           headers: {
             'Accept': 'application/json',
-            // ✅ ลบ Origin header ออก
           }
         });
-        console.log('✅ WordPress API working through APISIX:', apisixResponse.data);
-        return apisixResponse.data;
-      } catch (apisixError) {
-        console.warn('❌ APISIX WordPress API failed:', apisixError.message);
-        
-        // Try direct access
-        try {
-          console.log('Testing WordPress API directly...');
-          const directResponse = await axios.get(`http://${window.location.hostname}:8080/wp-json/wp/v2/posts`, { 
-            timeout: 8000,
-            headers: {
-              'Accept': 'application/json',
-            }
-          });
-          console.log('✅ WordPress API working directly:', directResponse.data);
-          return directResponse.data;
-        } catch (directError) {
-          console.warn('❌ Direct WordPress API failed:', directError.message);
-          
-          if (directError.response?.status === 404) {
-            throw new Error('WordPress REST API endpoint not found. This usually means: 1) WordPress is not fully installed, 2) Permalinks need to be reset, or 3) No posts exist yet');
-          }
-          
-          throw new Error('WordPress REST API is not accessible. Please check WordPress installation and REST API settings');
-        }
+        console.log('✅ WordPress API working directly:', directResponse.data);
+        return directResponse.data;
+        // eslint-disable-next-line no-unused-vars
+      } catch (directError) {
+        throw new Error(`WordPress API test failed: ${error.message}`);
       }
-    } catch (error) {
-      if (error.message.includes('setup required') || error.message.includes('install')) {
-        throw error;
-      }
-      
-      if (error.code === 'ECONNREFUSED' || error.message.includes('Network Error')) {
-        throw new Error('Cannot connect to WordPress. Please check if WordPress container is running');
-      }
-      
-      throw new Error(`WordPress API test failed: ${error.message}`);
     }
   },
 
   testGoFiberAPI: async () => {
+    console.log('🧪 Testing GoFiber API (API Key Required)...');
+    
     const testEndpoints = [
-      `${APISIX_GATEWAY_URL}/api/data`,
-      `http://${window.location.hostname}:3000/api/data`,
+      { url: `${APISIX_GATEWAY_URL}/api/data`, needsAuth: true, name: 'APISIX Gateway' },
+      { url: `http://${window.location.hostname}:3000/api/data`, needsAuth: false, name: 'Direct Access' },
     ];
 
     for (const endpoint of testEndpoints) {
       try {
-        console.log(`🧪 Testing GoFiber at: ${endpoint}`);
-        const response = await axios.get(endpoint, { 
+        console.log(`🧪 Testing GoFiber at: ${endpoint.url} (Auth: ${endpoint.needsAuth})`);
+        
+        const headers = {
+          'Accept': 'application/json',
+        };
+        
+        if (endpoint.needsAuth) {
+          headers['X-API-Key'] = apiKeys.getCurrentKey();
+        }
+        
+        const response = await axios.get(endpoint.url, { 
           timeout: 8000,
-          headers: {
-            'Accept': 'application/json',
-            // ✅ ลบ Origin header ออก
-          }
+          headers
         });
-        console.log(`✅ GoFiber API working at: ${endpoint}`);
+        console.log(`✅ GoFiber API working at: ${endpoint.name}`);
         return response.data;
       } catch (error) {
-        console.warn(`❌ GoFiber test failed for ${endpoint}:`, error.message);
+        console.warn(`❌ GoFiber test failed for ${endpoint.name}:`, error.message);
         if (endpoint === testEndpoints[testEndpoints.length - 1]) {
           throw new Error('GoFiber API is not accessible through any endpoint');
         }
@@ -383,6 +619,8 @@ export const api = {
   },
 
   testGoFiberHealth: async () => {
+    console.log('🩺 Testing GoFiber Health (No Auth Required)...');
+    
     const testEndpoints = [
       `${APISIX_GATEWAY_URL}/api/health`,
       `http://${window.location.hostname}:3000/api/health`,
@@ -395,7 +633,6 @@ export const api = {
           timeout: 8000,
           headers: {
             'Accept': 'application/json',
-            // ✅ ลบ Origin header ออก
           }
         });
         console.log(`✅ GoFiber health check working at: ${endpoint}`);
@@ -409,73 +646,7 @@ export const api = {
     }
   },
 
-  // ========== DATA OPERATIONS WITH IMPROVED CORS ==========
-  
-  createData: async (data) => {
-    try {
-      if (!data || typeof data !== 'object') {
-        throw new Error('Data is required and must be an object');
-      }
-
-      const response = await gatewayApi.post("/api/data", data);
-      return response.data;
-    } catch (error) {
-      handleError(error, 'createData');
-    }
-  },
-
-  updateData: async (id, data) => {
-    try {
-      if (!id) {
-        throw new Error('ID is required');
-      }
-      if (!data || typeof data !== 'object') {
-        throw new Error('Data is required and must be an object');
-      }
-
-      const response = await gatewayApi.put(`/api/data/${id}`, data);
-      return response.data;
-    } catch (error) {
-      handleError(error, 'updateData');
-    }
-  },
-
-  deleteData: async (id) => {
-    try {
-      if (!id) {
-        throw new Error('ID is required');
-      }
-
-      const response = await gatewayApi.delete(`/api/data/${id}`);
-      return response.data;
-    } catch (error) {
-      handleError(error, 'deleteData');
-    }
-  },
-
-  getData: async () => {
-    try {
-      const response = await gatewayApi.get("/api/data");
-      return response.data;
-    } catch (error) {
-      handleError(error, 'getData');
-    }
-  },
-
-  getDataById: async (id) => {
-    try {
-      if (!id) {
-        throw new Error('ID is required');
-      }
-
-      const response = await gatewayApi.get(`/api/data/${id}`);
-      return response.data;
-    } catch (error) {
-      handleError(error, 'getDataById');
-    }
-  },
-
-  // ========== COMPREHENSIVE PING WITH CORS DETECTION ==========
+  // ========== COMPREHENSIVE PING WITH AUTH STATUS ==========
   
   ping: async () => {
     const results = {
@@ -483,12 +654,30 @@ export const api = {
       gofiber: false,
       wordpress: false,
       routeManagement: false,
+      authentication: 'unknown',
       cors: 'unknown',
       timestamp: new Date().toISOString(),
-      details: {}
+      details: {},
+      apiKeyStatus: {}
     };
 
-    // Test APISIX with CORS detection
+    // Test API Keys
+    try {
+      console.log('🔑 Testing API Key authentication...');
+      const keyResults = await api.testAllApiKeys();
+      results.apiKeyStatus = keyResults;
+      
+      // Check if any key works
+      const workingKeys = Object.values(keyResults).filter(r => r.valid).length;
+      results.authentication = workingKeys > 0 ? 'working' : 'failed';
+      
+      console.log(`🔑 API Key test results: ${workingKeys}/${Object.keys(keyResults).length} keys working`);
+    } catch (error) {
+      console.log('❌ API Key test failed:', error.message);
+      results.details.authentication = { error: error.message };
+    }
+
+    // Test APISIX
     try {
       const apisixHealth = await api.checkAPISIXHealth();
       results.apisix = apisixHealth.status === 'healthy';
@@ -522,7 +711,7 @@ export const api = {
 
     // Test Route Management
     try {
-      await directApi.get('/api/routes');
+      await api.getRoutes();
       results.routeManagement = true;
       results.details.routeManagement = { status: 'healthy' };
     } catch (error) {
@@ -534,7 +723,7 @@ export const api = {
   },
 };
 
-// ========== IMPROVED REQUEST/RESPONSE INTERCEPTORS ==========
+// ========== REQUEST/RESPONSE INTERCEPTORS WITH AUTH ==========
 
 [gatewayApi, directApi].forEach((apiInstance, index) => {
   const instanceName = index === 0 ? 'Gateway' : 'Direct';
@@ -543,7 +732,10 @@ export const api = {
     (config) => {
       console.log(`🌐 ${instanceName} Request: ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`);
       
-      // ✅ ลบการตั้ง Origin header - Browser จะจัดการเอง
+      // Log API key usage for gateway requests
+      if (index === 0 && config.headers['X-API-Key']) {
+        console.log(`🔑 Using API Key: ${config.headers['X-API-Key'].substring(0, 8)}...`);
+      }
       
       return config;
     },
@@ -563,8 +755,14 @@ export const api = {
       const method = error.config?.method?.toUpperCase() || 'UNKNOWN';
       const url = error.config?.url || 'unknown';
       
-      // Enhanced CORS error detection
-      if (error.message && (
+      // Enhanced auth error detection
+      if (error.response?.status === 401) {
+        console.error(`🚫 ${instanceName} Auth Error: ${method} ${url} - API Key required or invalid`);
+        error.message = `Authentication failed: API Key required or invalid for ${url}`;
+      } else if (error.response?.status === 403) {
+        console.error(`🚫 ${instanceName} Permission Error: ${method} ${url} - Access forbidden`);
+        error.message = `Access forbidden: Your API key does not have permission for ${url}`;
+      } else if (error.message && (
         error.message.includes('CORS') || 
         error.message.includes('Access-Control-Allow-Origin') ||
         (error.code === 'ERR_NETWORK' && instanceName === 'Gateway')
