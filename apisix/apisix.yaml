@@ -1,3 +1,4 @@
+# apisix/apisix.yaml - แก้ไขให้ทำงานได้ถูกต้อง
 routes:
   # Route 1: Root endpoint - ส่งไปยัง GoFiber root
   - id: 1
@@ -18,7 +19,7 @@ routes:
     plugins:
       cors:
         allow_credentials: false
-        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With"
+        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With,X-API-Key"
         allow_methods: "GET,OPTIONS"
         allow_origins: "*"
         expose_headers: "Content-Length,X-Total-Count"
@@ -43,17 +44,17 @@ routes:
     plugins:
       cors:
         allow_credentials: false
-        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With"
+        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With,X-API-Key"
         allow_methods: "GET,OPTIONS"
         allow_origins: "*"
         expose_headers: "Content-Length,X-Total-Count"
         max_age: 86400
 
-  # Route 3: GoFiber Data API
+  # Route 3: GoFiber Data API - แก้ไข URI pattern
   - id: 3
     name: "GoFiber Data API"
     desc: "GoFiber backend data operations"
-    uri: "/api/data*"
+    uri: "/api/data"
     methods:
       - GET
       - POST
@@ -77,11 +78,69 @@ routes:
         expose_headers: "Content-Length,X-Total-Count"
         max_age: 86400
 
-  # Route 4: WordPress Posts API
+  # Route 3b: GoFiber Data API with ID - สำหรับ /api/data/:id
+  - id: 31
+    name: "GoFiber Data API with ID"
+    desc: "GoFiber backend data operations with ID"
+    uri: "/api/data/*"
+    methods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - OPTIONS
+    upstream:
+      type: roundrobin
+      nodes:
+        "gofiber-backend:3000": 1
+      timeout:
+        connect: 6
+        send: 6
+        read: 6
+    plugins:
+      cors:
+        allow_credentials: false
+        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With,X-API-Key"
+        allow_methods: "GET,POST,PUT,DELETE,OPTIONS"
+        allow_origins: "*"
+        expose_headers: "Content-Length,X-Total-Count"
+        max_age: 86400
+
+  # Route 4: WordPress Posts API - แก้ไข
   - id: 4
     name: "WordPress Posts API"
     desc: "WordPress REST API for posts"
-    uri: "/api/posts*"
+    uri: "/api/posts"
+    methods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - OPTIONS
+    upstream:
+      type: roundrobin
+      nodes:
+        "wordpress:80": 1
+      timeout:
+        connect: 6
+        send: 6
+        read: 6
+    plugins:
+      cors:
+        allow_credentials: false
+        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With"
+        allow_methods: "GET,POST,PUT,DELETE,OPTIONS"
+        allow_origins: "*"
+        expose_headers: "Content-Length,X-Total-Count"
+        max_age: 86400
+      proxy-rewrite:
+        uri: "/wp-json/wp/v2/posts"
+
+  # Route 4b: WordPress Posts API with ID
+  - id: 41
+    name: "WordPress Posts API with ID"
+    desc: "WordPress REST API for posts with ID"
+    uri: "/api/posts/*"
     methods:
       - GET
       - POST
@@ -106,8 +165,8 @@ routes:
         max_age: 86400
       proxy-rewrite:
         regex_uri:
-          - "^/api/posts(.*)"
-          - "/wp-json/wp/v2/posts$1"
+          - "^/api/posts/(.*)"
+          - "/wp-json/wp/v2/posts/$1"
 
   # Route 5: WordPress General API
   - id: 5
@@ -145,7 +204,7 @@ routes:
   - id: 6
     name: "Route Management API"
     desc: "Dynamic route management endpoints"
-    uri: "/api/routes*"
+    uri: "/api/routes"
     methods:
       - GET
       - POST
@@ -165,6 +224,59 @@ routes:
         allow_credentials: false
         allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With"
         allow_methods: "GET,POST,PUT,DELETE,OPTIONS"
+        allow_origins: "*"
+        expose_headers: "Content-Length,X-Total-Count"
+        max_age: 86400
+
+  # Route 6b: Route Management API with paths
+  - id: 61
+    name: "Route Management API Extended"
+    desc: "Dynamic route management endpoints with paths"
+    uri: "/api/routes/*"
+    methods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - OPTIONS
+    upstream:
+      type: roundrobin
+      nodes:
+        "gofiber-backend:3000": 1
+      timeout:
+        connect: 6
+        send: 6
+        read: 6
+    plugins:
+      cors:
+        allow_credentials: false
+        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With"
+        allow_methods: "GET,POST,PUT,DELETE,OPTIONS"
+        allow_origins: "*"
+        expose_headers: "Content-Length,X-Total-Count"
+        max_age: 86400
+
+  # Route 7: GoFiber Upstreams API
+  - id: 7
+    name: "Upstreams API"
+    desc: "Upstreams management endpoints"
+    uri: "/api/upstreams"
+    methods:
+      - GET
+      - OPTIONS
+    upstream:
+      type: roundrobin
+      nodes:
+        "gofiber-backend:3000": 1
+      timeout:
+        connect: 6
+        send: 6
+        read: 6
+    plugins:
+      cors:
+        allow_credentials: false
+        allow_headers: "Origin,Content-Type,Accept,Authorization,X-Requested-With"
+        allow_methods: "GET,OPTIONS"
         allow_origins: "*"
         expose_headers: "Content-Length,X-Total-Count"
         max_age: 86400
@@ -191,3 +303,4 @@ upstreams:
       connect: 6
       send: 6
       read: 6
+      

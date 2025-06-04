@@ -13,7 +13,7 @@ const GOFIBER_DIRECT_URL = getBaseURL(3000);
 // Create axios instance for Gateway API with CORS handling
 const gatewayApi = axios.create({
   baseURL: APISIX_GATEWAY_URL,
-  timeout: 10000,
+  timeout: 15000,
   headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
@@ -23,7 +23,7 @@ const gatewayApi = axios.create({
 // Create axios instance for direct GoFiber API
 const directApi = axios.create({
   baseURL: GOFIBER_DIRECT_URL,
-  timeout: 10000,
+  timeout: 15000,
   headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
@@ -71,10 +71,10 @@ export const api = {
           console.log(`Testing ${endpoint.name}: ${endpoint.url}`);
           
           const response = await axios.get(endpoint.url, { 
-            timeout: 5000,
+            timeout: 8000,
             headers: {
               'Accept': 'application/json',
-              'Origin': window.location.origin,
+              // ✅ ลบ Origin header ออก - Browser จะตั้งเอง
             },
             // Handle preflight requests
             validateStatus: function (status) {
@@ -293,7 +293,7 @@ export const api = {
       // Test WordPress installation first
       console.log('Testing WordPress installation...');
       const wpResponse = await axios.get(`http://${window.location.hostname}:8080`, { 
-        timeout: 5000,
+        timeout: 8000,
         maxRedirects: 0,
         validateStatus: function (status) {
           return status >= 200 && status < 400;
@@ -306,14 +306,14 @@ export const api = {
       
       console.log('WordPress appears to be installed, testing REST API...');
       
-      // Test through APISIX first (with CORS headers)
+      // Test through APISIX first (without Origin header)
       try {
         console.log('Testing WordPress API through APISIX...');
         const apisixResponse = await axios.get(`${APISIX_GATEWAY_URL}/api/posts`, { 
-          timeout: 5000,
+          timeout: 8000,
           headers: {
             'Accept': 'application/json',
-            'Origin': window.location.origin,
+            // ✅ ลบ Origin header ออก
           }
         });
         console.log('✅ WordPress API working through APISIX:', apisixResponse.data);
@@ -325,7 +325,7 @@ export const api = {
         try {
           console.log('Testing WordPress API directly...');
           const directResponse = await axios.get(`http://${window.location.hostname}:8080/wp-json/wp/v2/posts`, { 
-            timeout: 5000,
+            timeout: 8000,
             headers: {
               'Accept': 'application/json',
             }
@@ -365,10 +365,10 @@ export const api = {
       try {
         console.log(`🧪 Testing GoFiber at: ${endpoint}`);
         const response = await axios.get(endpoint, { 
-          timeout: 5000,
+          timeout: 8000,
           headers: {
             'Accept': 'application/json',
-            'Origin': window.location.origin,
+            // ✅ ลบ Origin header ออก
           }
         });
         console.log(`✅ GoFiber API working at: ${endpoint}`);
@@ -392,10 +392,10 @@ export const api = {
       try {
         console.log(`🩺 Testing GoFiber health at: ${endpoint}`);
         const response = await axios.get(endpoint, { 
-          timeout: 5000,
+          timeout: 8000,
           headers: {
             'Accept': 'application/json',
-            'Origin': window.location.origin,
+            // ✅ ลบ Origin header ออก
           }
         });
         console.log(`✅ GoFiber health check working at: ${endpoint}`);
@@ -543,10 +543,7 @@ export const api = {
     (config) => {
       console.log(`🌐 ${instanceName} Request: ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`);
       
-      // Add CORS headers for gateway requests
-      if (index === 0) {
-        config.headers['Origin'] = window.location.origin;
-      }
+      // ✅ ลบการตั้ง Origin header - Browser จะจัดการเอง
       
       return config;
     },
